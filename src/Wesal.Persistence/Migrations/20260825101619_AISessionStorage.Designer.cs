@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Wesal.Persistence.Data;
@@ -11,9 +12,11 @@ using Wesal.Persistence.Data;
 namespace Wesal.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260825101619_AISessionStorage")]
+    partial class AISessionStorage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -472,33 +475,6 @@ namespace Wesal.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_Ratings_Value", "\"Value\" BETWEEN 1 AND 5");
                         });
-                });
-
-            modelBuilder.Entity("Wesal.Domain.Entities.RevokedToken", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Jti")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)");
-
-                    b.Property<DateTimeOffset>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Jti")
-                        .IsUnique();
-
-                    b.ToTable("RevokedTokens", "wesal");
                 });
 
             modelBuilder.Entity("Wesal.Infrastructure.Identity.ApplicationRole", b =>
