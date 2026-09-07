@@ -1,0 +1,1 @@
+web: bash -c "echo 'PROCFILE_WORKS' && sleep infinity"
