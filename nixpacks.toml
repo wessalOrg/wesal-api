@@ -1,0 +1,13 @@
+[phases.setup]
+nixPkgs = ["dotnet-sdk_10"]
+nixpkgsArchive = "5c4b5e54b429fb1b151e5aa5f7c92d2820680fc4"
+aptPkgs = ["libgssapi-krb5-2"]
+
+[phases.build]
+nixpkgsArchive = "5c4b5e54b429fb1b151e5aa5f7c92d2820680fc4"
+cmds = ["dotnet restore src/Wesal.API/Wesal.API.csproj && dotnet publish src/Wesal.API/Wesal.API.csproj -c Release -o out --no-restore"]
+
+[variables]
+ASPNETCORE_ENVIRONMENT = "Production"
+DOTNET_gcServer = "0"
+DOTNET_gcConcurrent = "true"
