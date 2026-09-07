@@ -11,4 +11,4 @@ cmds = ["dotnet restore src/Wesal.API/Wesal.API.csproj && dotnet publish src/Wes
 ASPNETCORE_ENVIRONMENT = "Production"
 
 [start]
-cmd = "echo '=== launch begin ==='; which dotnet || echo DOTNET_NOT_FOUND; dotnet --list-runtimes 2>&1 | head -5; ls -la out/Wesal.API.dll 2>&1; echo '=== launching app ==='; dotnet out/Wesal.API.dll"
+cmd = "bash start.sh"
