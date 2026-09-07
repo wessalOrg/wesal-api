@@ -1,1 +1,1 @@
-web: dotnet out/Wesal.API.dll
+web: cd out && exec dotnet Wesal.API.dll
