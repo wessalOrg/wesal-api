@@ -1,0 +1,11 @@
+bin/
+obj/
+out/
+publish/
+artifacts/
+logs/
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
