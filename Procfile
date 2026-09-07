@@ -1,1 +1,1 @@
-web: cd out && exec dotnet Wesal.API.dll
+web: dotnet out/Wesal.API.dll --contentRoot=/app/out

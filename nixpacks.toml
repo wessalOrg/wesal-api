@@ -9,5 +9,6 @@ cmds = ["dotnet restore src/Wesal.API/Wesal.API.csproj && dotnet publish src/Wes
 
 [variables]
 ASPNETCORE_ENVIRONMENT = "Production"
+DOTNET_CONTENTROOT = "/app/out"
 DOTNET_gcServer = "0"
 DOTNET_gcConcurrent = "true"
