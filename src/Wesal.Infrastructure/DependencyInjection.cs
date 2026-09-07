@@ -20,6 +20,7 @@ using Wesal.Infrastructure.Comments;
 using Wesal.Infrastructure.Conversations;
 using Wesal.Infrastructure.AiAssistant;
 using Wesal.Infrastructure.Languages;
+using Wesal.Infrastructure.OwnerDashboard;
 using Wesal.Infrastructure.Profile;
 using Wesal.Infrastructure.Time;
 
@@ -73,6 +74,7 @@ public static class DependencyInjection
         services.AddScoped<ILoginService, LoginService>();
         services.AddScoped<ILogoutService, LogoutService>();
         services.AddScoped<IProfileService, ProfileService>();
+        services.AddScoped<IOwnerSidebarService, OwnerSidebarService>();
         services.AddScoped<ILanguageService, LanguageService>();
         services.AddSingleton<IChatSessionService, ChatSessionService>();
         services.AddSingleton<IHowToService, HowToService>();
