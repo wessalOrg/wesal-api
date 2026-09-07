@@ -61,6 +61,7 @@ public static class DependencyInjection
         services.AddScoped<IBookingRepository, BookingRepository>();
         services.AddScoped<IAISessionRepository, AISessionRepository>();
         services.AddScoped<ITokenRevocationRepository, TokenRevocationRepository>();
+        services.AddScoped<IOwnerDashboardRepository, OwnerDashboardRepository>();
 
         return services;
     }
