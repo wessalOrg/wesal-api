@@ -181,6 +181,8 @@ try
     app.MapHub<ConversationHub>("/hubs/conversation");
     app.MapHealthChecks("/health");
 
+    app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" }));
+
     app.MapGet("/", () => Results.Ok(new { service = "Wesal API", status = "running", version = "v1" }));
 
     app.Run();
