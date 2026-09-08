@@ -1,0 +1,14 @@
+{
+  "healthchecks": {
+    "web": [
+      {
+        "type": "readiness",
+        "name": "wesal-api-live",
+        "path": "/health/live",
+        "wait": 0,
+        "attempts": 3,
+        "timeout": 10
+      }
+    ]
+  }
+}
