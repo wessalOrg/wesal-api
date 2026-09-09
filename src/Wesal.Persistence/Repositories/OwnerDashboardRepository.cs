@@ -28,4 +28,35 @@ public sealed class OwnerDashboardRepository : IOwnerDashboardRepository
             .OrderByDescending(hall => hall.CreatedAt)
             .ThenBy(hall => hall.Name)
             .ToListAsync(cancellationToken);
+
+    public Task<Hall?> GetOwnedHallWithDetailsAsync(
+        Guid hallId,
+        string ownerId,
+        CancellationToken cancellationToken = default)
+        => OwnedHallsQuery(ownerId)
+            .Include(hall => hall.BookingPeriods)
+            .Include(hall => hall.Images)
+            .FirstOrDefaultAsync(hall => hall.Id == hallId, cancellationToken);
+
+    public Task<Hall?> GetOwnedHallForUpdateAsync(
+        Guid hallId,
+        string ownerId,
+        CancellationToken cancellationToken = default)
+        => _context.Halls
+            .Include(hall => hall.BookingPeriods)
+            .Include(hall => hall.Images)
+            .FirstOrDefaultAsync(
+                hall => hall.Id == hallId && hall.OwnerId == ownerId && !hall.IsDeleted,
+                cancellationToken);
+
+    public void AddHallImages(IEnumerable<HallImage> images)
+        => _context.HallImages.AddRange(images);
+
+    public void AddHallBookingPeriod(HallBookingPeriod period)
+        => _context.HallBookingPeriods.Add(period);
+
+    private IQueryable<Hall> OwnedHallsQuery(string ownerId)
+        => _context.Halls
+            .AsNoTracking()
+            .Where(hall => hall.OwnerId == ownerId && !hall.IsDeleted);
 }

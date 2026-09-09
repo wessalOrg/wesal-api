@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.AddScoped<IOwnerSidebarService, OwnerSidebarService>();
         services.AddScoped<IHallInitiationService, HallInitiationService>();
         services.AddScoped<IHallStatusTrackingService, HallStatusTrackingService>();
+        services.AddScoped<IOwnerHallService, OwnerHallService>();
         services.AddScoped<ILanguageService, LanguageService>();
         services.AddSingleton<IChatSessionService, ChatSessionService>();
         services.AddSingleton<IHowToService, HowToService>();

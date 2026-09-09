@@ -85,6 +85,96 @@ public class OwnerDashboardRepositoryShould
             hall => Assert.Equal("B", hall.Name));
     }
 
+    [Fact]
+    public async Task GetOwnedHallWithDetails_ReturnsOwnedHallWithPeriodsAndPhotos()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hallId = Guid.NewGuid();
+        var hall = new Hall { Id = hallId, Name = "Grand Hall", OwnerId = ownerId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        context.HallImages.AddRange(
+            new HallImage { HallId = hallId, Url = "a.jpg", DisplayOrder = 0 },
+            new HallImage { HallId = hallId, Url = "b.jpg", DisplayOrder = 1, IsDeleted = true });
+        context.HallBookingPeriods.AddRange(
+            new HallBookingPeriod { HallId = hallId, Type = BookingPeriodType.FirstPeriod, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(15, 0) },
+            new HallBookingPeriod { HallId = hallId, Type = BookingPeriodType.SecondPeriod, StartTime = new TimeOnly(16, 0), EndTime = new TimeOnly(23, 0) });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallWithDetailsAsync(hallId, ownerId);
+
+        Assert.NotNull(result);
+        Assert.Equal(hallId, result.Id);
+        Assert.Equal(2, result.BookingPeriods.Count);
+        Assert.Equal(2, result.Images.Count);
+    }
+
+    [Fact]
+    public async Task GetOwnedHallWithDetails_AnotherOwnersHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var otherId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Other's Hall", OwnerId = otherId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallWithDetailsAsync(hall.Id, ownerId);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetOwnedHallWithDetails_DeletedHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Deleted Hall", OwnerId = ownerId, Status = HallStatus.Approved, IsDeleted = true };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallWithDetailsAsync(hall.Id, ownerId);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetOwnedHallForUpdate_ReturnsTrackedAggregateThatPersistsChanges()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hallId = Guid.NewGuid();
+        var hall = new Hall { Id = hallId, Name = "Grand Hall", OwnerId = ownerId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        context.HallImages.Add(new HallImage { HallId = hallId, Url = "a.jpg", DisplayOrder = 0 });
+        context.HallBookingPeriods.Add(new HallBookingPeriod
+        {
+            HallId = hallId,
+            Type = BookingPeriodType.FirstPeriod,
+            StartTime = new TimeOnly(9, 0),
+            EndTime = new TimeOnly(15, 0)
+        });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallForUpdateAsync(hallId, ownerId);
+        Assert.NotNull(result);
+
+        result.Name = "Grand Hall Renamed";
+        result.Images.Single().IsDeleted = true;
+        await context.SaveChangesAsync();
+
+        Assert.Equal("Grand Hall Renamed", context.Halls.AsNoTracking().Single(item => item.Id == hallId).Name);
+        Assert.True(context.HallImages.AsNoTracking().Single(image => image.HallId == hallId).IsDeleted);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
