@@ -23,17 +23,20 @@ public class OwnerController : ControllerBase
     private readonly IHallCreationService _hallCreationService;
     private readonly IHallInitiationService _hallInitiationService;
     private readonly IHallStatusTrackingService _hallStatusTrackingService;
+    private readonly IOwnerHallService _ownerHallService;
 
     public OwnerController(
         IOwnerSidebarService sidebarService,
         IHallCreationService hallCreationService,
         IHallInitiationService hallInitiationService,
-        IHallStatusTrackingService hallStatusTrackingService)
+        IHallStatusTrackingService hallStatusTrackingService,
+        IOwnerHallService ownerHallService)
     {
         _sidebarService = sidebarService;
         _hallCreationService = hallCreationService;
         _hallInitiationService = hallInitiationService;
         _hallStatusTrackingService = hallStatusTrackingService;
+        _ownerHallService = ownerHallService;
     }
 
     /// <summary>
@@ -88,6 +91,51 @@ public class OwnerController : ControllerBase
     {
         var halls = await _hallStatusTrackingService.GetOwnedHallsAsync(cancellationToken);
         return Ok(halls);
+    }
+
+    /// <summary>
+    /// Returns the authenticated Hall Owner's hall with its full editable details
+    /// (US-OWNER-07): contact phone, region, address, description, capacity, price,
+    /// photos and the two daily booking periods, together with its current approval
+    /// status and a server-computed editability flag. The owner is resolved exclusively
+    /// from the authenticated session, so an owner can never read another owner's hall.
+    /// </summary>
+    [HttpGet("halls/{hallId:guid}")]
+    [ProducesResponseType(typeof(OwnerHallDetailsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OwnerHallDetailsDto>> GetOwnedHallDetails(
+        Guid hallId,
+        CancellationToken cancellationToken)
+    {
+        var details = await _ownerHallService.GetOwnedHallDetailsAsync(hallId, cancellationToken);
+        return Ok(details);
+    }
+
+    /// <summary>
+    /// Updates the authenticated Hall Owner's hall details (US-OWNER-07, FR-HALL-02).
+    /// Changes to an already-approved hall are applied atomically and take effect
+    /// immediately without re-triggering the Admin approval workflow; the hall's
+    /// approval status and owner identity are preserved server-side and are never taken
+    /// from the request. Editing is rejected while the hall is under Admin review
+    /// (PendingReview), surfacing a clear locked/pending message instead of applying
+    /// changes.
+    /// </summary>
+    [HttpPut("halls/{hallId:guid}")]
+    [ProducesResponseType(typeof(OwnerHallDetailsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OwnerHallDetailsDto>> UpdateOwnedHall(
+        Guid hallId,
+        [FromBody] UpdateOwnerHallRequest request,
+        CancellationToken cancellationToken)
+    {
+        var details = await _ownerHallService.UpdateOwnedHallAsync(hallId, request, cancellationToken);
+        return Ok(details);
     }
 
     [HttpPost("halls")]
