@@ -55,4 +55,9 @@ public interface IHallRepository
     {
         return Task.CompletedTask;
     }
+
+    Task<Hall?> GetHallByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<Hall?>(null);
+    }
 }
