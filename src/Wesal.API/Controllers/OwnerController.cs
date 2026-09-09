@@ -21,13 +21,16 @@ public class OwnerController : ControllerBase
 {
     private readonly IOwnerSidebarService _sidebarService;
     private readonly IHallInitiationService _hallInitiationService;
+    private readonly IHallStatusTrackingService _hallStatusTrackingService;
 
     public OwnerController(
         IOwnerSidebarService sidebarService,
-        IHallInitiationService hallInitiationService)
+        IHallInitiationService hallInitiationService,
+        IHallStatusTrackingService hallStatusTrackingService)
     {
         _sidebarService = sidebarService;
         _hallInitiationService = hallInitiationService;
+        _hallStatusTrackingService = hallStatusTrackingService;
     }
 
     /// <summary>
@@ -63,5 +66,24 @@ public class OwnerController : ControllerBase
     {
         var response = await _hallInitiationService.InitiateAsync(cancellationToken);
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Returns the authenticated Hall Owner's own halls with their current approval
+    /// status (US-OWNER-05). The owner is resolved exclusively from the authenticated
+    /// session and only that owner's halls are returned, so an owner can never read
+    /// another owner's halls. Status is read live from the persisted record on every
+    /// request, so the owner always sees the current PendingReview/Approved/Rejected
+    /// state even when an Admin approved or rejected the hall in another session.
+    /// </summary>
+    [HttpGet("halls")]
+    [ProducesResponseType(typeof(IReadOnlyList<OwnerHallDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<OwnerHallDto>>> GetOwnedHalls(CancellationToken cancellationToken)
+    {
+        var halls = await _hallStatusTrackingService.GetOwnedHallsAsync(cancellationToken);
+        return Ok(halls);
     }
 }
