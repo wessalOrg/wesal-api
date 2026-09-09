@@ -50,4 +50,9 @@ public interface IHallRepository
         DateOnly fromDate,
         DateOnly toDate,
         CancellationToken cancellationToken = default);
+
+    Task AddAsync(Hall hall, CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
 }
