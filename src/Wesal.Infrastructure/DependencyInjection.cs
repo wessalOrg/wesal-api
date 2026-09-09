@@ -20,8 +20,10 @@ using Wesal.Infrastructure.Comments;
 using Wesal.Infrastructure.Conversations;
 using Wesal.Infrastructure.AiAssistant;
 using Wesal.Infrastructure.Languages;
+using Wesal.Infrastructure.Admin;
 using Wesal.Infrastructure.OwnerDashboard;
 using Wesal.Infrastructure.Profile;
+using Wesal.Infrastructure.Search;
 using Wesal.Infrastructure.Time;
 
 namespace Wesal.Infrastructure;
@@ -79,6 +81,8 @@ public static class DependencyInjection
         services.AddScoped<IHallInitiationService, HallInitiationService>();
         services.AddScoped<IHallStatusTrackingService, HallStatusTrackingService>();
         services.AddScoped<IOwnerHallService, OwnerHallService>();
+        services.AddScoped<IAdminHallService, AdminHallService>();
+        services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
         services.AddScoped<ILanguageService, LanguageService>();
         services.AddSingleton<IChatSessionService, ChatSessionService>();
         services.AddSingleton<IHowToService, HowToService>();
