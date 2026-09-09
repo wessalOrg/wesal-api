@@ -19,10 +19,12 @@ namespace Wesal.API.Controllers;
 public class OwnerController : ControllerBase
 {
     private readonly IOwnerSidebarService _sidebarService;
+    private readonly IHallCreationService _hallCreationService;
 
-    public OwnerController(IOwnerSidebarService sidebarService)
+    public OwnerController(IOwnerSidebarService sidebarService, IHallCreationService hallCreationService)
     {
         _sidebarService = sidebarService;
+        _hallCreationService = hallCreationService;
     }
 
     /// <summary>
@@ -39,5 +41,53 @@ public class OwnerController : ControllerBase
     {
         var response = await _sidebarService.GetSidebarAsync(cancellationToken);
         return Ok(response);
+    }
+
+    [HttpPost("halls")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(CreateHallResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<CreateHallResponse>> CreateHall(
+        [FromForm] string Name,
+        [FromForm] string ContactPhone,
+        [FromForm] string Region,
+        [FromForm] string Address,
+        [FromForm] string Description,
+        [FromForm] int Capacity,
+        [FromForm] decimal? Price,
+        [FromForm] TimeOnly FirstPeriodStart,
+        [FromForm] TimeOnly FirstPeriodEnd,
+        [FromForm] TimeOnly SecondPeriodStart,
+        [FromForm] TimeOnly SecondPeriodEnd,
+        [FromForm] IFormFile[]? Photos,
+        CancellationToken cancellationToken)
+    {
+        var photoUploads = Photos == null ? null : await Task.WhenAll(Photos.Select(async p =>
+        {
+            using var ms = new MemoryStream();
+            await p.CopyToAsync(ms, cancellationToken);
+            return new HallPhotoUpload { FileName = p.FileName, ContentType = p.ContentType, Content = ms.ToArray() };
+        }));
+
+        var request = new CreateHallRequest
+        {
+            Name = Name,
+            ContactPhone = ContactPhone,
+            Region = Region,
+            Address = Address,
+            Description = Description,
+            Capacity = Capacity,
+            Price = Price,
+            FirstPeriodStart = FirstPeriodStart,
+            FirstPeriodEnd = FirstPeriodEnd,
+            SecondPeriodStart = SecondPeriodStart,
+            SecondPeriodEnd = SecondPeriodEnd,
+            Photos = photoUploads
+        };
+
+        var response = await _hallCreationService.CreateHallAsync(request, cancellationToken);
+        return CreatedAtAction(nameof(GetSidebar), response);
     }
 }
