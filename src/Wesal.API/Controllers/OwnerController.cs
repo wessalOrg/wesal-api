@@ -24,19 +24,22 @@ public class OwnerController : ControllerBase
     private readonly IHallInitiationService _hallInitiationService;
     private readonly IHallStatusTrackingService _hallStatusTrackingService;
     private readonly IOwnerHallService _ownerHallService;
+    private readonly IOwnerBookingRequestsService _ownerBookingRequestsService;
 
     public OwnerController(
         IOwnerSidebarService sidebarService,
         IHallCreationService hallCreationService,
         IHallInitiationService hallInitiationService,
         IHallStatusTrackingService hallStatusTrackingService,
-        IOwnerHallService ownerHallService)
+        IOwnerHallService ownerHallService,
+        IOwnerBookingRequestsService ownerBookingRequestsService)
     {
         _sidebarService = sidebarService;
         _hallCreationService = hallCreationService;
         _hallInitiationService = hallInitiationService;
         _hallStatusTrackingService = hallStatusTrackingService;
         _ownerHallService = ownerHallService;
+        _ownerBookingRequestsService = ownerBookingRequestsService;
     }
 
     /// <summary>
@@ -136,6 +139,31 @@ public class OwnerController : ControllerBase
     {
         var details = await _ownerHallService.UpdateOwnedHallAsync(hallId, request, cancellationToken);
         return Ok(details);
+    }
+
+    /// <summary>
+    /// Returns the incoming (pending) booking requests for the authenticated Hall
+    /// Owner's own hall (US-OWNER-09, FR-BOOK-01). Each entry shows the request id,
+    /// the requested date, its requested booking period, and the display name of the
+    /// Regular User who submitted it. The owner is resolved exclusively from the
+    /// authenticated session and the requester name is resolved server-side, so the
+    /// client can never read another owner's hall or impersonate a requester. All
+    /// pending requests are returned without deduplication: competing requests for the
+    /// same hall/date/period each appear, and a request covering both daily periods
+    /// appears as one entry per period. This endpoint is read-only and never changes a
+    /// booking's status, availability, or reservation.
+    /// </summary>
+    [HttpGet("halls/{hallId:guid}/bookings")]
+    [ProducesResponseType(typeof(IReadOnlyList<OwnerBookingRequestDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<OwnerBookingRequestDto>>> GetOwnedHallBookingRequests(
+        Guid hallId,
+        CancellationToken cancellationToken)
+    {
+        var requests = await _ownerBookingRequestsService.GetBookingRequestsAsync(hallId, cancellationToken);
+        return Ok(requests);
     }
 
     [HttpPost("halls")]
