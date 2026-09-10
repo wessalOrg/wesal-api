@@ -83,6 +83,7 @@ public static class DependencyInjection
         services.AddScoped<IOwnerHallService, OwnerHallService>();
         services.AddScoped<IAdminHallService, AdminHallService>();
         services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
+        services.AddScoped<IOwnerBookingRequestsService, OwnerBookingRequestsService>();
         services.AddScoped<ILanguageService, LanguageService>();
         services.AddSingleton<IChatSessionService, ChatSessionService>();
         services.AddSingleton<IHowToService, HowToService>();
