@@ -294,12 +294,13 @@ public class BookingRequestServiceShould
             bookingRepository,
             unitOfWork);
 
-        var result = await service.CreateBookingRequestAsync(CreateRequest(hall.Id));
+        var request = CreateRequest(hall.Id);
+        var result = await service.CreateBookingRequestAsync(request);
 
         var booking = Assert.Single(bookingRepository.AddedBookings);
         Assert.Equal(hall.Id, booking.HallId);
         Assert.Equal("user-1", booking.RequesterUserId);
-        Assert.Equal(new DateOnly(2026, 9, 10), booking.Date);
+        Assert.Equal(request.Date, booking.Date);
         Assert.Equal(BookingPeriodType.FirstPeriod, booking.Period);
         Assert.Equal(BookingStatus.Pending, booking.Status);
 
@@ -403,10 +404,10 @@ public class BookingRequestServiceShould
             unitOfWork ?? new FakeUnitOfWork());
 
     private static BookingRequestDto CreateRequest(Guid hallId)
-        => CreateRequest(hallId, new DateOnly(2026, 9, 10), [BookingPeriodType.FirstPeriod]);
+        => CreateRequest(hallId, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)), [BookingPeriodType.FirstPeriod]);
 
     private static BookingRequestDto CreateRequest(Guid hallId, IReadOnlyList<BookingPeriodType> periods)
-        => CreateRequest(hallId, new DateOnly(2026, 9, 10), periods.ToArray());
+        => CreateRequest(hallId, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)), periods.ToArray());
 
     private static BookingRequestDto CreateRequest(Guid hallId, DateOnly date, params BookingPeriodType[] periods)
         => new()
