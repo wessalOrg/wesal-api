@@ -78,6 +78,42 @@ public sealed class BookingRepository : IBookingRepository
         return 1;
     }
 
+    public async Task<int> AcceptPendingAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsRelational())
+        {
+            return await _context.Bookings
+                .Where(booking =>
+                    booking.Id == bookingId
+                    && booking.Status == BookingStatus.Pending)
+                .ExecuteUpdateAsync(
+                    set =>
+                        set.SetProperty(booking => booking.Status, BookingStatus.Accepted)
+                            .SetProperty(booking => booking.UpdatedAt, DateTimeOffset.UtcNow),
+                    cancellationToken);
+        }
+
+        var pending = await _context.Bookings
+            .Where(booking =>
+                booking.Id == bookingId
+                && booking.Status == BookingStatus.Pending)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (pending is null)
+        {
+            return 0;
+        }
+
+        pending.Status = BookingStatus.Accepted;
+        pending.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return 1;
+    }
+
     public async Task<bool> HasOtherActiveBookingsAsync(
         Guid hallId,
         DateOnly date,

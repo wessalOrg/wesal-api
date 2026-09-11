@@ -68,6 +68,8 @@ public static class DependencyInjection
         services.AddScoped<IBookingRequestService, BookingRequestService>();
         services.AddScoped<IBookingRejectionService, BookingRejectionService>();
         services.AddScoped<IBookingCancellationService, BookingCancellationService>();
+        services.AddScoped<IBookingAcceptanceService, BookingAcceptanceService>();
+        services.AddScoped<IOwnerBookingRequestNotifier, OwnerBookingRequestNotifier>();
         services.AddScoped<ISessionService, SessionService>();
         services.AddScoped<IRatingService, RatingService>();
         services.AddScoped<ICommentService, CommentService>();
