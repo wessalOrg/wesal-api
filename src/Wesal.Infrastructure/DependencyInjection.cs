@@ -21,6 +21,7 @@ using Wesal.Infrastructure.Conversations;
 using Wesal.Infrastructure.AiAssistant;
 using Wesal.Infrastructure.Languages;
 using Wesal.Infrastructure.Admin;
+using Wesal.Infrastructure.Background;
 using Wesal.Infrastructure.OwnerDashboard;
 using Wesal.Infrastructure.Profile;
 using Wesal.Infrastructure.Search;
@@ -85,6 +86,8 @@ public static class DependencyInjection
         services.AddScoped<IOwnerHallService, OwnerHallService>();
         services.AddScoped<IAdminHallService, AdminHallService>();
         services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
+        services.Configure<HallAvailabilityCleanupOptions>(configuration.GetSection(HallAvailabilityCleanupOptions.SectionName));
+        services.AddHostedService<HallAvailabilityCleanupBackgroundService>();
         services.AddScoped<IOwnerBookingRequestsService, OwnerBookingRequestsService>();
         services.AddScoped<ILanguageService, LanguageService>();
         services.AddSingleton<IChatSessionService, ChatSessionService>();
