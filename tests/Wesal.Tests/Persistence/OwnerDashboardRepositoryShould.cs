@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
+using Wesal.Infrastructure.Identity;
 using Wesal.Persistence.Data;
 using Wesal.Persistence.Repositories;
 
@@ -173,6 +174,165 @@ public class OwnerDashboardRepositoryShould
 
         Assert.Equal("Grand Hall Renamed", context.Halls.AsNoTracking().Single(item => item.Id == hallId).Name);
         Assert.True(context.HallImages.AsNoTracking().Single(image => image.HallId == hallId).IsDeleted);
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_AnotherOwnersHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var otherId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Other's Hall", OwnerId = otherId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hall.Id, ownerId);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_DeletedHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Deleted Hall", OwnerId = ownerId, Status = HallStatus.Approved, IsDeleted = true };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hall.Id, ownerId);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_OwnedHallWithoutRequests_ReturnsEmptyList()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Grand Hall", OwnerId = ownerId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hall.Id, ownerId);
+
+        Assert.NotNull(result);
+        Assert.Empty(result!);
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_ResolvesRequesterNameServerSide()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var requesterId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Grand Hall", OwnerId = ownerId, Status = HallStatus.Approved };
+        var requester = new ApplicationUser { Id = requesterId, UserName = "requester", FullName = "Mahmoud Salah" };
+        context.Halls.Add(hall);
+        context.Users.Add(requester);
+        context.Bookings.Add(new Booking
+        {
+            HallId = hall.Id,
+            RequesterUserId = requesterId,
+            Date = new DateOnly(2027, 6, 1),
+            Period = BookingPeriodType.FirstPeriod
+        });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hall.Id, ownerId);
+
+        var item = Assert.Single(result!);
+        Assert.Equal(requesterId, item.RequesterUserId);
+        Assert.Equal("Mahmoud Salah", item.RequesterName);
+        Assert.Equal(new DateOnly(2027, 6, 1), item.RequestedDate);
+        Assert.Equal(BookingPeriodType.FirstPeriod, item.RequestedPeriod);
+        Assert.Equal(BookingStatus.Pending, item.Status);
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_CompetingRequests_AreAllReturned()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var firstId = Guid.NewGuid().ToString();
+        var secondId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Grand Hall", OwnerId = ownerId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        context.Users.AddRange(
+            new ApplicationUser { Id = firstId, UserName = "first", FullName = "First Requester" },
+            new ApplicationUser { Id = secondId, UserName = "second", FullName = "Second Requester" });
+        context.Bookings.AddRange(
+            new Booking { HallId = hall.Id, RequesterUserId = firstId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.FirstPeriod },
+            new Booking { HallId = hall.Id, RequesterUserId = secondId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.FirstPeriod });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hall.Id, ownerId);
+
+        Assert.Equal(2, result!.Count);
+        Assert.Contains(result, item => item.RequesterUserId == firstId && item.RequesterName == "First Requester");
+        Assert.Contains(result, item => item.RequesterUserId == secondId && item.RequesterName == "Second Requester");
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_ExcludesNonPendingAndOtherHallsRequests()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var requesterId = Guid.NewGuid().ToString();
+        var hallA = new Hall { Id = Guid.NewGuid(), Name = "Hall A", OwnerId = ownerId, Status = HallStatus.Approved };
+        var hallB = new Hall { Id = Guid.NewGuid(), Name = "Hall B", OwnerId = ownerId, Status = HallStatus.Approved };
+        context.Halls.AddRange(hallA, hallB);
+        context.Users.Add(new ApplicationUser { Id = requesterId, UserName = "requester", FullName = "Pending Only" });
+        context.Bookings.AddRange(
+            new Booking { HallId = hallA.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.FirstPeriod, Status = BookingStatus.Pending },
+            new Booking { HallId = hallA.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.SecondPeriod, Status = BookingStatus.Accepted },
+            new Booking { HallId = hallA.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 6, 5), Period = BookingPeriodType.FirstPeriod, Status = BookingStatus.Rejected },
+            new Booking { HallId = hallB.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.FirstPeriod, Status = BookingStatus.Pending });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hallA.Id, ownerId);
+
+        var item = Assert.Single(result!);
+        Assert.Equal(BookingStatus.Pending, item.Status);
+        Assert.Equal(BookingPeriodType.FirstPeriod, item.RequestedPeriod);
+    }
+
+    [Fact]
+    public async Task GetBookingRequests_IsDeterministicallyOrdered()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var requesterId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Grand Hall", OwnerId = ownerId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        context.Users.Add(new ApplicationUser { Id = requesterId, UserName = "requester", FullName = "Ordered" });
+        context.Bookings.AddRange(
+            new Booking { HallId = hall.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 7, 2), Period = BookingPeriodType.FirstPeriod },
+            new Booking { HallId = hall.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.FirstPeriod },
+            new Booking { HallId = hall.Id, RequesterUserId = requesterId, Date = new DateOnly(2027, 6, 1), Period = BookingPeriodType.SecondPeriod });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetBookingRequestsAsync(hall.Id, ownerId);
+
+        Assert.Collection(
+            result!,
+            item => Assert.Equal(new DateOnly(2027, 6, 1), item.RequestedDate),
+            item => Assert.Equal(new DateOnly(2027, 6, 1), item.RequestedDate),
+            item => Assert.Equal(new DateOnly(2027, 7, 2), item.RequestedDate));
     }
 
     private static ApplicationDbContext CreateContext()

@@ -491,6 +491,11 @@ public class BookingCancellationServiceShould
             BookingPeriodType periodType,
             CancellationToken cancellationToken = default)
             => Task.FromResult(1);
+
+        public Task<int> AcceptPendingAsync(
+            Guid bookingId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(0);
     }
 
     private sealed class FakeConversationRepository : IConversationRepository

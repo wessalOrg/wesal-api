@@ -13,6 +13,8 @@ public interface IBookingRepository
 
     Task<int> CancelPendingAsync(Guid bookingId, string requesterUserId, CancellationToken cancellationToken = default);
 
+    Task<int> AcceptPendingAsync(Guid bookingId, CancellationToken cancellationToken = default);
+
     Task<bool> HasOtherActiveBookingsAsync(
         Guid hallId,
         DateOnly date,

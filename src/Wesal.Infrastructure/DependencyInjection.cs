@@ -69,6 +69,8 @@ public static class DependencyInjection
         services.AddScoped<IBookingRequestService, BookingRequestService>();
         services.AddScoped<IBookingRejectionService, BookingRejectionService>();
         services.AddScoped<IBookingCancellationService, BookingCancellationService>();
+        services.AddScoped<IBookingAcceptanceService, BookingAcceptanceService>();
+        services.AddScoped<IOwnerBookingRequestNotifier, OwnerBookingRequestNotifier>();
         services.AddScoped<ISessionService, SessionService>();
         services.AddScoped<IRatingService, RatingService>();
         services.AddScoped<ICommentService, CommentService>();
@@ -86,6 +88,7 @@ public static class DependencyInjection
         services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
         services.Configure<HallAvailabilityCleanupOptions>(configuration.GetSection(HallAvailabilityCleanupOptions.SectionName));
         services.AddHostedService<HallAvailabilityCleanupBackgroundService>();
+        services.AddScoped<IOwnerBookingRequestsService, OwnerBookingRequestsService>();
         services.AddScoped<ILanguageService, LanguageService>();
         services.AddSingleton<IChatSessionService, ChatSessionService>();
         services.AddSingleton<IHowToService, HowToService>();

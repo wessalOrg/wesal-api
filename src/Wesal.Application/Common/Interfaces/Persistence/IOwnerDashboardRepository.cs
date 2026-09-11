@@ -1,3 +1,4 @@
+using Wesal.Application.Common.Models;
 using Wesal.Domain.Entities;
 
 namespace Wesal.Application.Common.Interfaces.Persistence;
@@ -53,4 +54,22 @@ public interface IOwnerDashboardRepository
     /// Nothing is persisted here; the caller saves atomically through the unit of work.
     /// </summary>
     void AddHallBookingPeriod(HallBookingPeriod period);
+
+    /// <summary>
+    /// Returns the pending booking requests for a non-deleted hall owned by a given
+    /// user (US-OWNER-09, FR-BOOK-01). Ownership is filtered server-side, matching
+    /// <see cref="GetOwnedHallsAsync"/>: a caller can never read another owner's hall.
+    /// Returns <see langword="null"/> when the hall does not exist, is deleted, or
+    /// belongs to another user (so the caller can surface a not-found response) and an
+    /// empty list when the hall is owned but has no pending requests. Every pending
+    /// request is returned with no deduplication, so competing requests for the same
+    /// hall/date/period all appear. The requester's display name is resolved server-side
+    /// by joining the persisted user profile; no requester identity or name is ever taken
+    /// from client input. Result order is deterministic (requested date, then period,
+    /// then request creation time, then id).
+    /// </summary>
+    Task<IReadOnlyList<OwnerBookingRequestDto>?> GetBookingRequestsAsync(
+        Guid hallId,
+        string ownerId,
+        CancellationToken cancellationToken = default);
 }

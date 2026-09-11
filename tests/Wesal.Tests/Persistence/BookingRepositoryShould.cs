@@ -292,6 +292,141 @@ public class BookingRepositoryShould
     }
 
     [Fact]
+    public async Task AcceptPendingAsync_PendingBooking_TransitionsToAccepted()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.AcceptPendingAsync(booking.Id);
+
+        Assert.Equal(1, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.NotNull(stored);
+        Assert.Equal(BookingStatus.Accepted, stored!.Status);
+        Assert.Equal(booking.HallId, stored.HallId);
+        Assert.Equal(booking.RequesterUserId, stored.RequesterUserId);
+        Assert.Equal(booking.Date, stored.Date);
+        Assert.Equal(booking.Period, stored.Period);
+    }
+
+    [Fact]
+    public async Task AcceptPendingAsync_AlreadyAccepted_ReturnsZero()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Accepted);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.AcceptPendingAsync(booking.Id);
+
+        Assert.Equal(0, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.Equal(BookingStatus.Accepted, stored!.Status);
+    }
+
+    [Fact]
+    public async Task AcceptPendingAsync_Rejected_ReturnsZero()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Rejected);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.AcceptPendingAsync(booking.Id);
+
+        Assert.Equal(0, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.Equal(BookingStatus.Rejected, stored!.Status);
+    }
+
+    [Fact]
+    public async Task AcceptPendingAsync_Cancelled_ReturnsZero()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Cancelled);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.AcceptPendingAsync(booking.Id);
+
+        Assert.Equal(0, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.Equal(BookingStatus.Cancelled, stored!.Status);
+    }
+
+    [Fact]
+    public async Task AcceptPendingAsync_ConcurrentAttempts_OnlyFirstWins()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        Guid bookingId;
+
+        await using (var seedingContext = CreateContext(databaseName))
+        {
+            var hall = SeedHall(seedingContext);
+            var booking = SeedBooking(seedingContext, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod);
+            bookingId = booking.Id;
+        }
+
+        int firstRows;
+        int secondRows;
+
+        await using (var firstContext = CreateContext(databaseName))
+        {
+            firstRows = await new BookingRepository(firstContext).AcceptPendingAsync(bookingId);
+        }
+
+        await using (var secondContext = CreateContext(databaseName))
+        {
+            secondRows = await new BookingRepository(secondContext).AcceptPendingAsync(bookingId);
+        }
+
+        await using (var readContext = CreateContext(databaseName))
+        {
+            var stored = await readContext.Bookings.FindAsync(bookingId);
+            Assert.NotNull(stored);
+            Assert.Equal(BookingStatus.Accepted, stored!.Status);
+        }
+
+        Assert.Equal(1, firstRows);
+        Assert.Equal(0, secondRows);
+    }
+
+    [Fact]
+    public async Task AcceptThenCancel_OnlyOneTransitionWins()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        Guid bookingId;
+
+        await using (var seedingContext = CreateContext(databaseName))
+        {
+            var hall = SeedHall(seedingContext);
+            var booking = SeedBooking(seedingContext, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod);
+            bookingId = booking.Id;
+        }
+
+        await using (var acceptContext = CreateContext(databaseName))
+        {
+            var acceptRows = await new BookingRepository(acceptContext).AcceptPendingAsync(bookingId);
+            Assert.Equal(1, acceptRows);
+        }
+
+        await using (var cancelContext = CreateContext(databaseName))
+        {
+            var cancelRows = await new BookingRepository(cancelContext).CancelPendingAsync(bookingId, "user-1");
+            Assert.Equal(0, cancelRows);
+        }
+
+        await using (var readContext = CreateContext(databaseName))
+        {
+            var stored = await readContext.Bookings.FindAsync(bookingId);
+            Assert.NotNull(stored);
+            Assert.Equal(BookingStatus.Accepted, stored!.Status);
+        }
+    }
+
+    [Fact]
     public async Task HasOtherActiveBookingsAsync_True_WhenAnotherPending()
     {
         await using var context = CreateContext();
