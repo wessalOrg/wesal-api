@@ -13,6 +13,7 @@ using Wesal.Infrastructure;
 using Wesal.Infrastructure.Conversations;
 using Wesal.Infrastructure.Logging;
 using Wesal.Infrastructure.Middleware;
+using Wesal.Infrastructure.OwnerDashboard;
 using Wesal.Persistence;
 using Wesal.Persistence.Data;
 
@@ -179,6 +180,7 @@ try
 
     app.MapControllers();
     app.MapHub<ConversationHub>("/hubs/conversation");
+    app.MapHub<OwnerDashboardHub>("/hubs/owner-dashboard");
     app.MapHealthChecks("/health");
 
     app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" }));

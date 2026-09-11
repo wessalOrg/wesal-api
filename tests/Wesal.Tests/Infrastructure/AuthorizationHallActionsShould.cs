@@ -8,6 +8,7 @@ using Wesal.Domain.Exceptions;
 using Wesal.Infrastructure.Bookings;
 using Wesal.Infrastructure.Comments;
 using Wesal.Infrastructure.Conversations;
+using Wesal.Infrastructure.OwnerDashboard;
 using Wesal.Infrastructure.Ratings;
 
 namespace Wesal.Tests.Infrastructure;
@@ -115,6 +116,7 @@ public class AuthorizationHallActionsShould
         public Task<Booking?> GetByIdWithHallAsync(Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult<Booking?>(null);
         public Task<IReadOnlyList<Booking>> GetPendingRejectionNotificationsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Booking>>([]);
         public Task<int> CancelPendingAsync(Guid bookingId, string requesterUserId, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> AcceptPendingAsync(Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<bool> HasOtherActiveBookingsAsync(Guid hallId, DateOnly date, BookingPeriodType periodType, Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<int> ReleasePeriodAsync(Guid hallId, DateOnly date, BookingPeriodType periodType, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<int> ReservePeriodAsync(Guid hallId, DateOnly date, BookingPeriodType periodType, CancellationToken cancellationToken = default) => Task.FromResult(1);
@@ -137,7 +139,16 @@ public class AuthorizationHallActionsShould
     private static BookingRequestService CreateBookingService(
         FakeHallRepository repo,
         FakeCurrentUserService user)
-        => new(repo, user, new FakeBookingRepository(), new FakeUnitOfWork());
+        => new(repo, user, new FakeBookingRepository(), new FakeUnitOfWork(), new FakeOwnerBookingRequestNotifier());
+
+    private sealed class FakeOwnerBookingRequestNotifier : IOwnerBookingRequestNotifier
+    {
+        public Task NotifyBookingRequestReceivedAsync(
+            string ownerUserId,
+            OwnerBookingRequestNotificationEvent notification,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
 
     // Guest attempts → 401
     [Fact]

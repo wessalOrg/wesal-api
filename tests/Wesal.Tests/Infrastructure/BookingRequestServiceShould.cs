@@ -7,6 +7,7 @@ using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
 using Wesal.Domain.Exceptions;
 using Wesal.Infrastructure.Bookings;
+using Wesal.Infrastructure.OwnerDashboard;
 
 namespace Wesal.Tests.Infrastructure;
 
@@ -392,16 +393,193 @@ public class BookingRequestServiceShould
         Assert.True(unitOfWork.Transaction.RolledBack);
     }
 
+    [Fact]
+    public async Task CreateBookingRequestAsync_SinglePeriod_SendsNotificationToOwnerAfterCommit()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = "owner-1";
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod);
+        var bookingRepository = new FakeBookingRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var notifier = new FakeOwnerBookingRequestNotifier();
+        var currentUser = new FakeCurrentUserService("user-1", true, ApplicationRoles.RegisteredUser);
+
+        var service = CreateService(fakeRepository, currentUser, bookingRepository, unitOfWork, notifier);
+
+        var request = CreateRequest(hall.Id);
+        var result = await service.CreateBookingRequestAsync(request);
+
+        Assert.Single(notifier.Sent);
+        var (ownerId, notification) = notifier.Sent[0];
+        Assert.Equal("owner-1", ownerId);
+        Assert.Equal(result.Periods[0].BookingId, notification.BookingRequestId);
+        Assert.Equal(hall.Id, notification.HallId);
+        Assert.Equal("Approved Hall", notification.HallName);
+        Assert.Equal(request.Date, notification.RequestedDate);
+        Assert.Equal(BookingPeriodType.FirstPeriod, notification.RequestedPeriod);
+        Assert.Equal("user-1", notification.RequesterUserId);
+        Assert.Equal("BookingRequestReceived", notification.EventType);
+        Assert.True(unitOfWork.Transaction.Committed);
+    }
+
+    [Fact]
+    public async Task CreateBookingRequestAsync_BothPeriods_SendsTwoNotifications()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = "owner-1";
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod, BookingPeriodType.SecondPeriod);
+        var bookingRepository = new FakeBookingRepository();
+        var notifier = new FakeOwnerBookingRequestNotifier();
+
+        var service = CreateService(
+            fakeRepository,
+            new FakeCurrentUserService("user-1", true, ApplicationRoles.RegisteredUser),
+            bookingRepository: bookingRepository,
+            notifier: notifier);
+
+        await service.CreateBookingRequestAsync(
+            CreateRequest(hall.Id, [BookingPeriodType.FirstPeriod, BookingPeriodType.SecondPeriod]));
+
+        Assert.Equal(2, notifier.Sent.Count);
+        Assert.Contains(notifier.Sent, s => s.Notification.RequestedPeriod == BookingPeriodType.FirstPeriod);
+        Assert.Contains(notifier.Sent, s => s.Notification.RequestedPeriod == BookingPeriodType.SecondPeriod);
+        Assert.All(notifier.Sent, s => Assert.Equal("owner-1", s.OwnerId));
+    }
+
+    [Fact]
+    public async Task CreateBookingRequestAsync_NotificationFailure_DoesNotRollbackBooking()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = "owner-1";
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod);
+        var bookingRepository = new FakeBookingRepository();
+        var unitOfWork = new FakeUnitOfWork();
+        var notifier = new FakeOwnerBookingRequestNotifier { ThrowOnNotify = true };
+
+        var service = CreateService(
+            fakeRepository,
+            new FakeCurrentUserService("user-1", true, ApplicationRoles.RegisteredUser),
+            bookingRepository,
+            unitOfWork,
+            notifier);
+
+        var result = await service.CreateBookingRequestAsync(CreateRequest(hall.Id));
+
+        Assert.Single(bookingRepository.AddedBookings);
+        Assert.Equal(BookingStatus.Pending, bookingRepository.AddedBookings[0].Status);
+        Assert.True(unitOfWork.Transaction.Committed);
+    }
+
+    [Fact]
+    public async Task CreateBookingRequestAsync_NoOwnerId_DoesNotSendNotification()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = null;
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod);
+        var notifier = new FakeOwnerBookingRequestNotifier();
+
+        var service = CreateService(
+            fakeRepository,
+            new FakeCurrentUserService("user-1", true, ApplicationRoles.RegisteredUser),
+            notifier: notifier);
+
+        await service.CreateBookingRequestAsync(CreateRequest(hall.Id));
+
+        Assert.Empty(notifier.Sent);
+    }
+
+    [Fact]
+    public async Task CreateBookingRequestAsync_TakenPeriod_DoesNotSendNotification()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = "owner-1";
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod, BookingPeriodType.SecondPeriod);
+        var bookingRepository = new FakeBookingRepository();
+        bookingRepository.BlockedPeriods.Add(BookingPeriodType.SecondPeriod);
+        var notifier = new FakeOwnerBookingRequestNotifier();
+        var unitOfWork = new FakeUnitOfWork();
+
+        var service = CreateService(
+            fakeRepository,
+            new FakeCurrentUserService("user-1", true, ApplicationRoles.RegisteredUser),
+            bookingRepository,
+            unitOfWork,
+            notifier);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.CreateBookingRequestAsync(
+                CreateRequest(hall.Id, [BookingPeriodType.FirstPeriod, BookingPeriodType.SecondPeriod])));
+
+        Assert.Empty(notifier.Sent);
+        Assert.False(unitOfWork.Transaction.Committed);
+    }
+
+    [Fact]
+    public async Task CreateBookingRequestAsync_NotificationPayload_MatchesRequesterUserName()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = "owner-1";
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod);
+        var notifier = new FakeOwnerBookingRequestNotifier();
+
+        var currentUser = new FakeCurrentUserService("user-1", true, ApplicationRoles.RegisteredUser)
+        {
+            UserName = "Ahmad Hassan"
+        };
+
+        var service = CreateService(fakeRepository, currentUser, notifier: notifier);
+
+        await service.CreateBookingRequestAsync(CreateRequest(hall.Id));
+
+        var notification = notifier.Sent[0].Notification;
+        Assert.Equal("Ahmad Hassan", notification.RequesterName);
+    }
+
+    [Fact]
+    public async Task CreateBookingRequestAsync_Guest_DoesNotSendNotification()
+    {
+        var hall = CreateHall("Approved Hall", HallStatus.Approved);
+        hall.OwnerId = "owner-1";
+        var fakeRepository = new FakeHallRepository();
+        fakeRepository.Halls.Add(hall);
+        ConfigurePeriods(fakeRepository, hall, BookingPeriodType.FirstPeriod);
+        var notifier = new FakeOwnerBookingRequestNotifier();
+
+        var service = CreateService(
+            fakeRepository,
+            new FakeCurrentUserService(null, false),
+            notifier: notifier);
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            service.CreateBookingRequestAsync(CreateRequest(hall.Id)));
+
+        Assert.Empty(notifier.Sent);
+    }
+
     private static BookingRequestService CreateService(
         FakeHallRepository repository,
         FakeCurrentUserService currentUser,
         FakeBookingRepository? bookingRepository = null,
-        FakeUnitOfWork? unitOfWork = null)
+        FakeUnitOfWork? unitOfWork = null,
+        FakeOwnerBookingRequestNotifier? notifier = null)
         => new(
             repository,
             currentUser,
             bookingRepository ?? new FakeBookingRepository(),
-            unitOfWork ?? new FakeUnitOfWork());
+            unitOfWork ?? new FakeUnitOfWork(),
+            notifier ?? new FakeOwnerBookingRequestNotifier());
 
     private static BookingRequestDto CreateRequest(Guid hallId)
         => CreateRequest(hallId, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)), [BookingPeriodType.FirstPeriod]);
@@ -510,7 +688,7 @@ public class BookingRequestServiceShould
 
         public string? UserId { get; }
 
-        public string? UserName => null;
+        public string? UserName { get; set; }
 
         public string? Email => null;
 
@@ -566,6 +744,11 @@ public class BookingRequestServiceShould
             Reservations.Add((hallId, date, periodType));
             return Task.FromResult(BlockedPeriods.Contains(periodType) ? 0 : 1);
         }
+
+        public Task<int> AcceptPendingAsync(
+            Guid bookingId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(0);
     }
 
     private sealed class FakeUnitOfWork : IUnitOfWork
@@ -603,5 +786,26 @@ public class BookingRequestServiceShould
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    internal sealed class FakeOwnerBookingRequestNotifier : IOwnerBookingRequestNotifier
+    {
+        public List<(string OwnerId, OwnerBookingRequestNotificationEvent Notification)> Sent { get; } = [];
+
+        public bool ThrowOnNotify { get; set; }
+
+        public Task NotifyBookingRequestReceivedAsync(
+            string ownerUserId,
+            OwnerBookingRequestNotificationEvent notification,
+            CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnNotify)
+            {
+                throw new InvalidOperationException("The realtime channel failed.");
+            }
+
+            Sent.Add((ownerUserId, notification));
+            return Task.CompletedTask;
+        }
     }
 }
