@@ -27,4 +27,13 @@ public interface IOwnerHallService
         Guid hallId,
         UpdateOwnerHallRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Soft-deletes the authenticated owner's hall (US-OWNER-16). Sets IsDeleted
+    /// server-side; historical bookings/messages/conversations are preserved.
+    /// Repeated deletion of an already-deleted hall returns NotFound.
+    /// </summary>
+    Task DeleteOwnedHallAsync(
+        Guid hallId,
+        CancellationToken cancellationToken = default);
 }

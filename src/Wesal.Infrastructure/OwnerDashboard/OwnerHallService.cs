@@ -24,17 +24,20 @@ public sealed class OwnerHallService : IOwnerHallService
     private readonly ICurrentUserService _currentUser;
     private readonly IOwnerDashboardRepository _ownerDashboardRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHallAvailabilityCleanupService? _cleanupService;
 
     public OwnerHallService(
         UserManager<ApplicationUser> userManager,
         ICurrentUserService currentUser,
         IOwnerDashboardRepository ownerDashboardRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IHallAvailabilityCleanupService? cleanupService = null)
     {
         _userManager = userManager;
         _currentUser = currentUser;
         _ownerDashboardRepository = ownerDashboardRepository;
         _unitOfWork = unitOfWork;
+        _cleanupService = cleanupService;
     }
 
     public async Task<OwnerHallDetailsDto> GetOwnedHallDetailsAsync(
@@ -103,6 +106,65 @@ public sealed class OwnerHallService : IOwnerHallService
         }
 
         return MapToDetails(hall);
+    }
+
+    public async Task DeleteOwnedHallAsync(
+        Guid hallId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var ownerId = await ResolveOwnerAsync(cancellationToken);
+
+        var hall = await _ownerDashboardRepository.GetOwnedHallForUpdateAsync(hallId, ownerId, cancellationToken);
+
+        if (hall is null)
+        {
+            throw new NotFoundException(nameof(Hall), hallId);
+        }
+
+        hall.IsDeleted = true;
+        hall.UpdatedAt = DateTimeOffset.UtcNow;
+
+        IWesalTransaction? transaction = null;
+
+        try
+        {
+            transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (_cleanupService is not null)
+            {
+                try
+                {
+                    await _cleanupService.CleanupForHallAsync(hallId, cancellationToken);
+                }
+                catch
+                {
+                    // Cleanup is best-effort here; Hall remains deleted and
+                    // background/fallback cleanup will retry. Do not rollback deletion.
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     private async Task<string> ResolveOwnerAsync(CancellationToken cancellationToken)

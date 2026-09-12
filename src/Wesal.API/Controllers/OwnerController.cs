@@ -166,6 +166,25 @@ public class OwnerController : ControllerBase
         return Ok(requests);
     }
 
+    /// <summary>
+    /// Soft-deletes the authenticated Hall Owner's own hall (US-OWNER-16).
+    /// Historical bookings/messages/conversations are preserved; the hall is
+    /// removed from public visibility and new bookings are rejected.
+    /// Repeated deletion returns NotFound.
+    /// </summary>
+    [HttpDelete("halls/{hallId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteOwnedHall(
+        Guid hallId,
+        CancellationToken cancellationToken)
+    {
+        await _ownerHallService.DeleteOwnedHallAsync(hallId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("halls")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(CreateHallResponse), StatusCodes.Status201Created)]
