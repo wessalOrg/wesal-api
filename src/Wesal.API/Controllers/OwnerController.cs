@@ -26,6 +26,7 @@ public class OwnerController : ControllerBase
     private readonly IOwnerHallService _ownerHallService;
     private readonly IOwnerBookingRequestsService _ownerBookingRequestsService;
     private readonly IOwnerAvailabilityService _ownerAvailabilityService;
+    private readonly IHallSubscriptionService _hallSubscriptionService;
 
     public OwnerController(
         IOwnerSidebarService sidebarService,
@@ -34,7 +35,8 @@ public class OwnerController : ControllerBase
         IHallStatusTrackingService hallStatusTrackingService,
         IOwnerHallService ownerHallService,
         IOwnerBookingRequestsService ownerBookingRequestsService,
-        IOwnerAvailabilityService ownerAvailabilityService)
+        IOwnerAvailabilityService ownerAvailabilityService,
+        IHallSubscriptionService hallSubscriptionService)
     {
         _sidebarService = sidebarService;
         _hallCreationService = hallCreationService;
@@ -43,6 +45,7 @@ public class OwnerController : ControllerBase
         _ownerHallService = ownerHallService;
         _ownerBookingRequestsService = ownerBookingRequestsService;
         _ownerAvailabilityService = ownerAvailabilityService;
+        _hallSubscriptionService = hallSubscriptionService;
     }
 
     /// <summary>
@@ -186,6 +189,29 @@ public class OwnerController : ControllerBase
     {
         await _ownerHallService.DeleteOwnedHallAsync(hallId, cancellationToken);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Returns the current subscription status of the authenticated Hall Owner's own
+    /// hall (US-OWNER-17, FR-HALL-05): Active when the hall's 30-day paid cycle is
+    /// running, Payment Pending when the hall is under review or approved but unpaid,
+    /// Expired when the paid cycle ended without renewal, and Locked when an Admin
+    /// manually locked it. The next billing date is included whenever the hall has a
+    /// paid cycle. The owner is resolved exclusively from the authenticated session
+    /// and the status is computed live from the persisted record on every request.
+    /// This endpoint is read-only and never changes payment, approval or lock state.
+    /// </summary>
+    [HttpGet("halls/{hallId:guid}/subscription")]
+    [ProducesResponseType(typeof(OwnerHallSubscriptionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OwnerHallSubscriptionDto>> GetOwnedHallSubscription(
+        Guid hallId,
+        CancellationToken cancellationToken)
+    {
+        var subscription = await _hallSubscriptionService.GetHallSubscriptionAsync(hallId, cancellationToken);
+        return Ok(subscription);
     }
 
     /// <summary>

@@ -57,6 +57,16 @@ public sealed class OwnerDashboardRepository : IOwnerDashboardRepository
     public void AddHallBookingPeriod(HallBookingPeriod period)
         => _context.HallBookingPeriods.Add(period);
 
+    public Task<Hall?> GetOwnedHallAsync(
+        Guid hallId,
+        string ownerId,
+        CancellationToken cancellationToken = default)
+        => _context.Halls
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                hall => hall.Id == hallId && hall.OwnerId == ownerId && !hall.IsDeleted,
+                cancellationToken);
+
     public async Task<IReadOnlyList<OwnerBookingRequestDto>?> GetBookingRequestsAsync(
         Guid hallId,
         string ownerId,

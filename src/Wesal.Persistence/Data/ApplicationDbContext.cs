@@ -66,6 +66,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(hall => hall.Address).IsRequired().HasMaxLength(500);
             entity.Property(hall => hall.Description).HasMaxLength(2000);
             entity.Property(hall => hall.Price).HasPrecision(12, 2);
+            entity.Property(hall => hall.SubscriptionCycleEnd).HasColumnType("date");
 
             entity.HasIndex(hall => hall.Status);
             entity.HasIndex(hall => new { hall.Status, hall.IsDeleted });

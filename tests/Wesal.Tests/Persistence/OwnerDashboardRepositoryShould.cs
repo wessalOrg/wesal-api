@@ -177,6 +177,79 @@ public class OwnerDashboardRepositoryShould
     }
 
     [Fact]
+    public async Task GetOwnedHall_ReturnsOwnedHallWithSubscriptionState()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hallId = Guid.NewGuid();
+        var cycleEnd = new DateOnly(2026, 10, 1);
+        context.Halls.Add(new Hall
+        {
+            Id = hallId,
+            Name = "Grand Hall",
+            OwnerId = ownerId,
+            Status = HallStatus.Approved,
+            SubscriptionCycleEnd = cycleEnd,
+            IsAdminLocked = true
+        });
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallAsync(hallId, ownerId);
+
+        Assert.NotNull(result);
+        Assert.Equal(hallId, result!.Id);
+        Assert.Equal(cycleEnd, result.SubscriptionCycleEnd);
+        Assert.True(result.IsAdminLocked);
+    }
+
+    [Fact]
+    public async Task GetOwnedHall_AnotherOwnersHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var otherId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Other's Hall", OwnerId = otherId, Status = HallStatus.Approved };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallAsync(hall.Id, ownerId);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetOwnedHall_DeletedHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+        var ownerId = Guid.NewGuid().ToString();
+        var hall = new Hall { Id = Guid.NewGuid(), Name = "Deleted Hall", OwnerId = ownerId, Status = HallStatus.Approved, IsDeleted = true };
+        context.Halls.Add(hall);
+        await context.SaveChangesAsync();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallAsync(hall.Id, ownerId);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetOwnedHall_NonexistentHall_ReturnsNull()
+    {
+        await using var context = CreateContext();
+
+        var repository = new OwnerDashboardRepository(context);
+
+        var result = await repository.GetOwnedHallAsync(Guid.NewGuid(), Guid.NewGuid().ToString());
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public async Task GetBookingRequests_AnotherOwnersHall_ReturnsNull()
     {
         await using var context = CreateContext();
