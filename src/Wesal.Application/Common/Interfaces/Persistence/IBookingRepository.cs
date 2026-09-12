@@ -17,6 +17,8 @@ public interface IBookingRepository
 
     Task<int> PublishAcceptedAsync(Guid bookingId, CancellationToken cancellationToken = default);
 
+    Task<int> DeleteAsync(Guid bookingId, CancellationToken cancellationToken = default);
+
     Task<bool> HasOtherActiveBookingsAsync(
         Guid hallId,
         DateOnly date,

@@ -490,6 +490,9 @@ public class BookingRejectionServiceShould
         public Task<int> PublishAcceptedAsync(Guid bookingId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<int> DeleteAsync(Guid bookingId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public Task<bool> HasOtherActiveBookingsAsync(
             Guid hallId,
             DateOnly date,
