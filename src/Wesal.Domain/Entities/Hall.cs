@@ -29,6 +29,21 @@ public class Hall : BaseAuditableEntity
 
     public string? OwnerId { get; set; }
 
+    /// <summary>
+    /// End of the hall's current 30-day paid subscription cycle, i.e. its next
+    /// billing date (US-OWNER-17, FR-SUB-01/FR-SUB-02). Null when the hall has never
+    /// had a confirmed payment; a non-null value means the Admin confirmed a payment
+    /// confirming the cycle. The per-hall cycle starts on that payment-confirmation.
+    /// </summary>
+    public DateOnly? SubscriptionCycleEnd { get; set; }
+
+    /// <summary>
+    /// Manual Admin lock for this hall (FR-SUB-05). Independent of the payment-driven
+    /// state: when set, hall access is restricted regardless of subscription status
+    /// until an Admin unlocks it.
+    /// </summary>
+    public bool IsAdminLocked { get; set; }
+
     public ICollection<HallBookingPeriod> BookingPeriods { get; set; } = [];
 
     public ICollection<HallAvailability> Availability { get; set; } = [];

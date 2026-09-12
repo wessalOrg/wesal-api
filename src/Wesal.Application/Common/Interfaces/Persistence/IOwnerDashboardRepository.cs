@@ -56,6 +56,18 @@ public interface IOwnerDashboardRepository
     void AddHallBookingPeriod(HallBookingPeriod period);
 
     /// <summary>
+    /// Returns a single non-deleted hall owned by a user together with its
+    /// subscription state (US-OWNER-17, FR-HALL-05). Read-only (no tracking); the
+    /// caller must not mutate the returned aggregate. Returns <see langword="null"/>
+    /// when the hall does not exist, is deleted, or belongs to another user so the
+    /// caller can surface a not-found response.
+    /// </summary>
+    Task<Hall?> GetOwnedHallAsync(
+        Guid hallId,
+        string ownerId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the pending booking requests for a non-deleted hall owned by a given
     /// user (US-OWNER-09, FR-BOOK-01). Ownership is filtered server-side, matching
     /// <see cref="GetOwnedHallsAsync"/>: a caller can never read another owner's hall.
