@@ -114,6 +114,44 @@ public sealed class BookingRepository : IBookingRepository
         return 1;
     }
 
+    public async Task<int> PublishAcceptedAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsRelational())
+        {
+            return await _context.Bookings
+                .Where(booking =>
+                    booking.Id == bookingId
+                    && booking.Status == BookingStatus.Accepted
+                    && !booking.IsPublished)
+                .ExecuteUpdateAsync(
+                    set =>
+                        set.SetProperty(booking => booking.IsPublished, true)
+                            .SetProperty(booking => booking.UpdatedAt, DateTimeOffset.UtcNow),
+                    cancellationToken);
+        }
+
+        var accepted = await _context.Bookings
+            .Where(booking =>
+                booking.Id == bookingId
+                && booking.Status == BookingStatus.Accepted
+                && !booking.IsPublished)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (accepted is null)
+        {
+            return 0;
+        }
+
+        accepted.IsPublished = true;
+        accepted.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return 1;
+    }
+
     public async Task<bool> HasOtherActiveBookingsAsync(
         Guid hallId,
         DateOnly date,

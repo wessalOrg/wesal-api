@@ -1,6 +1,5 @@
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
-using Wesal.Application.Common.Models;
 using Wesal.Domain.Constants;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
@@ -9,17 +8,17 @@ using Wesal.Infrastructure.Bookings;
 
 namespace Wesal.Tests.Infrastructure;
 
-public class BookingAcceptanceServiceShould
+public class BookingPublishingServiceShould
 {
     private const string HallOwnerId = "owner-1";
     private const string RequesterId = "user-1";
 
     [Fact]
-    public async Task AcceptBooking_OwnPendingBooking_ReturnsAcceptedResult()
+    public async Task PublishBooking_OwnAcceptedBooking_ReturnsPublishedResult()
     {
         var scenario = Scenario();
 
-        var result = await scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+        var result = await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
 
         Assert.Equal(scenario.Booking.Id, result.BookingId);
         Assert.Equal(scenario.Hall.Id, result.HallId);
@@ -28,24 +27,26 @@ public class BookingAcceptanceServiceShould
         Assert.Equal(new DateOnly(2035, 6, 1), result.Date);
         Assert.Equal(BookingPeriodType.FirstPeriod, result.Period);
         Assert.Equal(BookingStatus.Accepted, result.Status);
+        Assert.True(result.IsPublished);
     }
 
     [Fact]
-    public async Task AcceptBooking_OwnPendingBooking_SetsStatusToAccepted()
+    public async Task PublishBooking_OwnAcceptedBooking_MarksBookingPublished()
     {
         var scenario = Scenario();
 
-        await scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+        await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
 
+        Assert.True(scenario.Booking.IsPublished);
         Assert.Equal(BookingStatus.Accepted, scenario.Booking.Status);
     }
 
     [Fact]
-    public async Task AcceptBooking_PreservesRequesterHallDateAndPeriod()
+    public async Task PublishBooking_PreservesRequesterHallDateAndPeriod()
     {
         var scenario = Scenario();
 
-        await scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+        await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
 
         Assert.Equal(RequesterId, scenario.Booking.RequesterUserId);
         Assert.Equal(scenario.Hall.Id, scenario.Booking.HallId);
@@ -54,178 +55,222 @@ public class BookingAcceptanceServiceShould
     }
 
     [Fact]
-    public async Task AcceptBooking_KeepsPeriodReserved()
+    public async Task PublishBooking_OnlyTouchesTheRequestedPeriod_AndNeverReleases()
     {
         var scenario = Scenario();
 
-        await scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+        await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
 
+        var reserved = Assert.Single(scenario.BookingRepository.ReservedPeriods);
+        Assert.Equal(scenario.Booking.HallId, reserved.HallId);
+        Assert.Equal(scenario.Booking.Date, reserved.Date);
+        Assert.Equal(scenario.Booking.Period, reserved.Period);
         Assert.Empty(scenario.BookingRepository.ReleasedPeriods);
     }
 
     [Fact]
-    public async Task AcceptBooking_Unauthenticated_ThrowsUnauthorized()
+    public async Task PublishBooking_PerformsFinalAvailabilityCheck()
+    {
+        var scenario = Scenario();
+
+        await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+
+        Assert.True(scenario.BookingRepository.AvailabilityCheckPerformed);
+    }
+
+    [Fact]
+    public async Task PublishBooking_CompetingActiveBooking_ThrowsConflict_WithoutSideEffects()
+    {
+        var scenario = Scenario();
+        scenario.BookingRepository.HasCompetingBooking = true;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+
+        Assert.False(scenario.Booking.IsPublished);
+        Assert.Empty(scenario.BookingRepository.ReservedPeriods);
+    }
+
+    [Fact]
+    public async Task PublishBooking_Unauthenticated_ThrowsUnauthorized()
     {
         var scenario = Scenario(userId: null);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_RegisteredUser_ThrowsForbidden()
+    public async Task PublishBooking_RegisteredUser_ThrowsForbidden()
     {
         var scenario = Scenario(userId: RequesterId, roles: [ApplicationRoles.RegisteredUser]);
 
         await Assert.ThrowsAsync<ForbiddenException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_Admin_ThrowsForbidden()
+    public async Task PublishBooking_Admin_ThrowsForbidden()
     {
         var scenario = Scenario(userId: "admin-1", roles: [ApplicationRoles.Admin]);
 
         await Assert.ThrowsAsync<ForbiddenException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_AnotherOwner_ThrowsForbidden()
+    public async Task PublishBooking_AnotherOwner_ThrowsForbidden()
     {
         var scenario = Scenario(userId: "owner-2", roles: [ApplicationRoles.HallOwner]);
 
         await Assert.ThrowsAsync<ForbiddenException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_UnknownBooking_ThrowsNotFound()
+    public async Task PublishBooking_UnknownBooking_ThrowsNotFound()
     {
         var scenario = Scenario();
 
         await Assert.ThrowsAsync<NotFoundException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, Guid.NewGuid()));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, Guid.NewGuid()));
     }
 
     [Fact]
-    public async Task AcceptBooking_WrongHallId_ThrowsNotFound()
+    public async Task PublishBooking_WrongHallId_ThrowsNotFound()
     {
         var scenario = Scenario();
 
         await Assert.ThrowsAsync<NotFoundException>(() =>
-            scenario.Service.AcceptBookingAsync(Guid.NewGuid(), scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(Guid.NewGuid(), scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_DeletedHall_ThrowsNotFound()
+    public async Task PublishBooking_DeletedHall_ThrowsNotFound()
     {
         var scenario = Scenario();
         scenario.Hall.IsDeleted = true;
 
         await Assert.ThrowsAsync<NotFoundException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_AlreadyAccepted_ThrowsConflict()
+    public async Task PublishBooking_PendingBooking_ThrowsConflict()
     {
-        var scenario = Scenario();
-        scenario.Booking.Status = BookingStatus.Accepted;
+        var scenario = Scenario(status: BookingStatus.Pending);
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_RejectedBooking_ThrowsConflict()
+    public async Task PublishBooking_RejectedBooking_ThrowsConflict()
     {
-        var scenario = Scenario();
-        scenario.Booking.Status = BookingStatus.Rejected;
+        var scenario = Scenario(status: BookingStatus.Rejected);
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_CancelledBooking_ThrowsConflict()
+    public async Task PublishBooking_CancelledBooking_ThrowsConflict()
     {
-        var scenario = Scenario();
-        scenario.Booking.Status = BookingStatus.Cancelled;
+        var scenario = Scenario(status: BookingStatus.Cancelled);
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_RaceLost_ThrowsConflict_WithoutSideEffects()
+    public async Task PublishBooking_AlreadyPublished_ThrowsConflict()
+    {
+        var scenario = Scenario(isPublished: true);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+    }
+
+    [Fact]
+    public async Task PublishBooking_RaceLost_ThrowsConflict_WithoutSideEffects()
     {
         var scenario = Scenario();
         scenario.BookingRepository.ForceZeroConditionalUpdate = true;
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
 
-        Assert.Equal(BookingStatus.Pending, scenario.Booking.Status);
-        Assert.False(scenario.BookingRepository.AcceptedAgainstCancelled);
+        Assert.Equal(BookingStatus.Accepted, scenario.Booking.Status);
+        Assert.False(scenario.Booking.IsPublished);
     }
 
     [Fact]
-    public async Task AcceptBooking_StorageFailure_RollsBackStatusToPending()
+    public async Task PublishBooking_StorageFailure_RollsBackPublication()
     {
         var scenario = Scenario();
         scenario.UnitOfWork.ThrowOnSave = true;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
 
-        Assert.Equal(BookingStatus.Pending, scenario.Booking.Status);
+        Assert.Equal(BookingStatus.Accepted, scenario.Booking.Status);
+        Assert.False(scenario.Booking.IsPublished);
+        Assert.True(scenario.UnitOfWork.RolledBack);
     }
 
     [Fact]
-    public async Task AcceptBooking_ExcludesBookingFromPendingSet_WhileKeepingHistory()
+    public async Task PublishBooking_KeepsBookingHistory()
     {
         var scenario = Scenario();
 
-        await scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+        await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
 
-        var pendingBookings = scenario.BookingRepository.PendingBookings;
-        Assert.DoesNotContain(scenario.Booking.Id, pendingBookings.Select(b => b.Id));
         Assert.Contains(scenario.Booking.Id, scenario.Bookings.Select(b => b.Id));
     }
 
     [Fact]
-    public async Task AcceptBooking_RepeatAttempt_ThrowsConflict()
+    public async Task PublishBooking_RepeatAttempt_ThrowsConflict()
     {
         var scenario = Scenario();
 
-        await scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
+        await scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id);
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            scenario.Service.AcceptBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+    }
+
+    [Fact]
+    public async Task PublishBooking_PendingBooking_TellsOwnerToAcceptFirst()
+    {
+        var scenario = Scenario(status: BookingStatus.Pending);
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(() =>
+            scenario.Service.PublishBookingAsync(scenario.Hall.Id, scenario.Booking.Id));
+
+        Assert.Contains("accept", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static ScenarioContext Scenario(
         IReadOnlyList<Booking>? bookings = null,
         string? userId = HallOwnerId,
-        IReadOnlyList<string>? roles = null)
+        IReadOnlyList<string>? roles = null,
+        BookingStatus status = BookingStatus.Accepted,
+        bool isPublished = false)
     {
-        var bookingsList = bookings ?? [CreateBooking(Hall(), RequesterId)];
+        var bookingsList = bookings ?? [CreateBooking(Hall(), RequesterId, status, isPublished)];
         var hall = bookingsList[0].Hall;
+
+        var unitOfWork = new FakeUnitOfWork(bookingsList.ToList());
 
         var context = new ScenarioContext
         {
             BookingRepository = new FakeBookingRepository([.. bookingsList]),
-            UnitOfWork = new FakeUnitOfWork(),
+            UnitOfWork = unitOfWork,
             CurrentUser = CurrentUser(userId, roles ?? [ApplicationRoles.HallOwner]),
             Service = null!
         };
 
-        var unitOfWork = new FakeUnitOfWork(context.BookingRepository.Bookings.ToList());
-
-        context.UnitOfWork = unitOfWork;
-
-        context.Service = new BookingAcceptanceService(
+        context.Service = new BookingPublishingService(
             context.BookingRepository,
             unitOfWork,
             context.CurrentUser);
@@ -245,7 +290,11 @@ public class BookingAcceptanceServiceShould
             OwnerId = HallOwnerId
         };
 
-    private static Booking CreateBooking(Hall hall, string requesterId, BookingStatus status = BookingStatus.Pending)
+    private static Booking CreateBooking(
+        Hall hall,
+        string requesterId,
+        BookingStatus status = BookingStatus.Accepted,
+        bool isPublished = false)
         => new()
         {
             Id = Guid.NewGuid(),
@@ -254,18 +303,19 @@ public class BookingAcceptanceServiceShould
             RequesterUserId = requesterId,
             Date = new DateOnly(2035, 6, 1),
             Period = BookingPeriodType.FirstPeriod,
-            Status = status
+            Status = status,
+            IsPublished = isPublished
         };
 
     private sealed class ScenarioContext
     {
         public required FakeBookingRepository BookingRepository { get; init; }
 
-        public FakeUnitOfWork UnitOfWork { get; set; } = null!;
+        public required FakeUnitOfWork UnitOfWork { get; init; }
 
         public required FakeCurrentUserService CurrentUser { get; init; }
 
-        public required BookingAcceptanceService Service { get; set; }
+        public required BookingPublishingService Service { get; set; }
 
         public IReadOnlyList<Booking> Bookings => BookingRepository.Bookings;
 
@@ -285,12 +335,13 @@ public class BookingAcceptanceServiceShould
 
         public IReadOnlyList<Booking> Bookings => _bookings;
 
-        public IEnumerable<Booking> PendingBookings
-            => _bookings.Where(b => b.Status == BookingStatus.Pending);
-
         public bool ForceZeroConditionalUpdate { get; set; }
 
-        public bool AcceptedAgainstCancelled { get; private set; }
+        public bool HasCompetingBooking { get; set; }
+
+        public bool AvailabilityCheckPerformed { get; private set; }
+
+        public List<(Guid HallId, DateOnly Date, BookingPeriodType Period)> ReservedPeriods { get; } = [];
 
         public List<(Guid HallId, DateOnly Date, BookingPeriodType Period)> ReleasedPeriods { get; } = [];
 
@@ -330,12 +381,8 @@ public class BookingAcceptanceServiceShould
         {
             var booking = _bookings.FirstOrDefault(b => b.Id == bookingId);
 
-            if (booking is null
-                || booking.Status != BookingStatus.Pending
-                || booking.Status == BookingStatus.Cancelled
-                || ForceZeroConditionalUpdate)
+            if (booking is null || booking.Status != BookingStatus.Pending)
             {
-                AcceptedAgainstCancelled = booking?.Status == BookingStatus.Cancelled;
                 return Task.FromResult(0);
             }
 
@@ -368,7 +415,8 @@ public class BookingAcceptanceServiceShould
             Guid bookingId,
             CancellationToken cancellationToken = default)
         {
-            var hasOther = _bookings.Any(b =>
+            AvailabilityCheckPerformed = true;
+            var hasOther = HasCompetingBooking || _bookings.Any(b =>
                 b.HallId == hallId
                 && b.Date == date
                 && b.Period == periodType
@@ -393,7 +441,10 @@ public class BookingAcceptanceServiceShould
             DateOnly date,
             BookingPeriodType periodType,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(1);
+        {
+            ReservedPeriods.Add((hallId, date, periodType));
+            return Task.FromResult(1);
+        }
     }
 
     private sealed class FakeUnitOfWork : IUnitOfWork
@@ -412,7 +463,7 @@ public class BookingAcceptanceServiceShould
         public Task<IWesalTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         {
             var snapshot = _bookings
-                .Select(b => new BookingStatusSnapshot(b.Id, b.Status))
+                .Select(b => new BookingPublicationSnapshot(b.Id, b.Status, b.IsPublished))
                 .ToList();
 
             return Task.FromResult<IWesalTransaction>(new FakeWesalTransaction(this, snapshot, _bookings));
@@ -432,13 +483,13 @@ public class BookingAcceptanceServiceShould
     private sealed class FakeWesalTransaction : IWesalTransaction
     {
         private readonly FakeUnitOfWork _unitOfWork;
-        private readonly IReadOnlyList<BookingStatusSnapshot> _snapshot;
+        private readonly IReadOnlyList<BookingPublicationSnapshot> _snapshot;
         private readonly List<Booking> _bookings;
         private bool _completed;
 
         public FakeWesalTransaction(
             FakeUnitOfWork unitOfWork,
-            IReadOnlyList<BookingStatusSnapshot> snapshot,
+            IReadOnlyList<BookingPublicationSnapshot> snapshot,
             List<Booking> bookings)
         {
             _unitOfWork = unitOfWork;
@@ -479,12 +530,13 @@ public class BookingAcceptanceServiceShould
                 if (booking is not null)
                 {
                     booking.Status = snapshot.Status;
+                    booking.IsPublished = snapshot.IsPublished;
                 }
             }
         }
     }
 
-    private sealed record BookingStatusSnapshot(Guid Id, BookingStatus Status);
+    private sealed record BookingPublicationSnapshot(Guid Id, BookingStatus Status, bool IsPublished);
 
     private sealed class FakeCurrentUserService : ICurrentUserService
     {

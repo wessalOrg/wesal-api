@@ -496,6 +496,11 @@ public class BookingCancellationServiceShould
             Guid bookingId,
             CancellationToken cancellationToken = default)
             => Task.FromResult(0);
+
+        public Task<int> PublishAcceptedAsync(
+            Guid bookingId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(0);
     }
 
     private sealed class FakeConversationRepository : IConversationRepository
