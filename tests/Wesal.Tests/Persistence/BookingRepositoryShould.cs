@@ -723,6 +723,90 @@ public class BookingRepositoryShould
         Assert.Equal(AvailabilityStatus.Available, (await context.HallAvailabilities.FindAsync(otherDate.Id))!.Status);
     }
 
+    [Fact]
+    public async Task DeleteAsync_ExistingBooking_RemovesRowAndReturnsOne()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Accepted);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.DeleteAsync(booking.Id);
+
+        Assert.Equal(1, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.Null(stored);
+        Assert.Empty(context.Bookings);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_UnknownId_ReturnsZero()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.DeleteAsync(Guid.NewGuid());
+
+        Assert.Equal(0, affectedRows);
+        Assert.Single(context.Halls);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ConcurrentAttempts_OnlyFirstWins()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        Guid bookingId;
+
+        await using (var seedingContext = CreateContext(databaseName))
+        {
+            var hall = SeedHall(seedingContext);
+            var booking = SeedBooking(seedingContext, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod);
+            bookingId = booking.Id;
+        }
+
+        int firstRows;
+        int secondRows;
+
+        await using (var firstContext = CreateContext(databaseName))
+        {
+            firstRows = await new BookingRepository(firstContext).DeleteAsync(bookingId);
+        }
+
+        await using (var secondContext = CreateContext(databaseName))
+        {
+            secondRows = await new BookingRepository(secondContext).DeleteAsync(bookingId);
+        }
+
+        await using (var readContext = CreateContext(databaseName))
+        {
+            var stored = await readContext.Bookings.FindAsync(bookingId);
+            Assert.Null(stored);
+        }
+
+        Assert.Equal(1, firstRows);
+        Assert.Equal(0, secondRows);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_KeepsHallAvailabilityAndOtherBookings()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var target = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod);
+        var otherBooking = SeedBooking(context, hall, "user-2", new DateOnly(2035, 6, 2), BookingPeriodType.SecondPeriod);
+        var availability = SeedAvailability(context, hall, target.Date, target.Period, AvailabilityStatus.Booked);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.DeleteAsync(target.Id);
+
+        Assert.Equal(1, affectedRows);
+        Assert.Single(context.Bookings);
+        Assert.Equal(otherBooking.Id, context.Bookings.Single().Id);
+        Assert.NotNull(context.Halls.Find(hall.Id));
+        Assert.Equal(AvailabilityStatus.Booked, (await context.HallAvailabilities.FindAsync(availability.Id))!.Status);
+    }
+
     private static async Task<int> TryApproveAsync(ApplicationDbContext context, Guid bookingId)
     {
         if (context.Database.IsRelational())

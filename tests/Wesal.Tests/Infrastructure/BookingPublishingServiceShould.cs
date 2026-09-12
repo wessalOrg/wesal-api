@@ -408,6 +408,21 @@ public class BookingPublishingServiceShould
             return Task.FromResult(1);
         }
 
+        public Task<int> DeleteAsync(
+            Guid bookingId,
+            CancellationToken cancellationToken = default)
+        {
+            var booking = _bookings.FirstOrDefault(b => b.Id == bookingId);
+
+            if (booking is null)
+            {
+                return Task.FromResult(0);
+            }
+
+            _bookings.Remove(booking);
+            return Task.FromResult(1);
+        }
+
         public Task<bool> HasOtherActiveBookingsAsync(
             Guid hallId,
             DateOnly date,
