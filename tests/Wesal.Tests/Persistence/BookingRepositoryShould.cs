@@ -525,6 +525,115 @@ public class BookingRepositoryShould
     }
 
     [Fact]
+    public async Task PublishAcceptedAsync_AcceptedBooking_PublishesAndPreservesData()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Accepted);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.PublishAcceptedAsync(booking.Id);
+
+        Assert.Equal(1, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.NotNull(stored);
+        Assert.True(stored!.IsPublished);
+        Assert.Equal(BookingStatus.Accepted, stored.Status);
+        Assert.Equal(booking.HallId, stored.HallId);
+        Assert.Equal(booking.RequesterUserId, stored.RequesterUserId);
+        Assert.Equal(booking.Date, stored.Date);
+        Assert.Equal(booking.Period, stored.Period);
+    }
+
+    [Fact]
+    public async Task PublishAcceptedAsync_AlreadyPublished_ReturnsZero()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var booking = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Accepted, isPublished: true);
+        var repository = new BookingRepository(context);
+
+        var affectedRows = await repository.PublishAcceptedAsync(booking.Id);
+
+        Assert.Equal(0, affectedRows);
+        var stored = await repository.GetByIdWithHallAsync(booking.Id);
+        Assert.True(stored!.IsPublished);
+        Assert.Equal(BookingStatus.Accepted, stored.Status);
+    }
+
+    [Fact]
+    public async Task PublishAcceptedAsync_NonAccepted_ReturnsZero()
+    {
+        await using var context = CreateContext();
+        var hall = SeedHall(context);
+        var pending = SeedBooking(context, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Pending);
+        var rejected = SeedBooking(context, hall, "user-2", new DateOnly(2035, 6, 2), BookingPeriodType.SecondPeriod, BookingStatus.Rejected);
+        var cancelled = SeedBooking(context, hall, "user-3", new DateOnly(2035, 6, 3), BookingPeriodType.FirstPeriod, BookingStatus.Cancelled);
+        var repository = new BookingRepository(context);
+
+        var pendingRows = await repository.PublishAcceptedAsync(pending.Id);
+        var rejectedRows = await repository.PublishAcceptedAsync(rejected.Id);
+        var cancelledRows = await repository.PublishAcceptedAsync(cancelled.Id);
+
+        Assert.Equal(0, pendingRows);
+        Assert.Equal(0, rejectedRows);
+        Assert.Equal(0, cancelledRows);
+        Assert.False((await repository.GetByIdWithHallAsync(pending.Id))!.IsPublished);
+        Assert.False((await repository.GetByIdWithHallAsync(rejected.Id))!.IsPublished);
+        Assert.False((await repository.GetByIdWithHallAsync(cancelled.Id))!.IsPublished);
+    }
+
+    [Fact]
+    public async Task PublishAcceptedAsync_ConcurrentAttempts_OnlyFirstWins()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        Guid bookingId;
+
+        await using (var seedingContext = CreateContext(databaseName))
+        {
+            var hall = SeedHall(seedingContext);
+            var booking = SeedBooking(seedingContext, hall, "user-1", new DateOnly(2035, 6, 1), BookingPeriodType.FirstPeriod, BookingStatus.Accepted);
+            bookingId = booking.Id;
+        }
+
+        int firstRows;
+        int secondRows;
+
+        await using (var firstContext = CreateContext(databaseName))
+        {
+            firstRows = await new BookingRepository(firstContext).PublishAcceptedAsync(bookingId);
+        }
+
+        await using (var secondContext = CreateContext(databaseName))
+        {
+            secondRows = await new BookingRepository(secondContext).PublishAcceptedAsync(bookingId);
+        }
+
+        await using (var readContext = CreateContext(databaseName))
+        {
+            var stored = await readContext.Bookings.FindAsync(bookingId);
+            Assert.NotNull(stored);
+            Assert.True(stored!.IsPublished);
+            Assert.Equal(BookingStatus.Accepted, stored.Status);
+        }
+
+        Assert.Equal(1, firstRows);
+        Assert.Equal(0, secondRows);
+    }
+
+    [Fact]
+    public void Model_ConfiguresIsPublishedForBooking()
+    {
+        using var context = CreateContext();
+        var entityType = context.Model.FindEntityType(typeof(Booking))!;
+
+        var property = entityType.FindProperty(nameof(Booking.IsPublished));
+        Assert.NotNull(property);
+        Assert.Equal(typeof(bool), property!.ClrType);
+        Assert.False(property.IsNullable);
+    }
+
+    [Fact]
     public async Task PendingSet_ExcludesCancelled_AndKeepsHistory()
     {
         await using var context = CreateContext();
@@ -659,7 +768,8 @@ public class BookingRepositoryShould
         string requesterUserId,
         DateOnly date,
         BookingPeriodType period,
-        BookingStatus status = BookingStatus.Pending)
+        BookingStatus status = BookingStatus.Pending,
+        bool isPublished = false)
     {
         var booking = new Booking
         {
@@ -669,7 +779,8 @@ public class BookingRepositoryShould
             RequesterUserId = requesterUserId,
             Date = date,
             Period = period,
-            Status = status
+            Status = status,
+            IsPublished = isPublished
         };
 
         context.Bookings.Add(booking);

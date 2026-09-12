@@ -117,6 +117,7 @@ public class AuthorizationHallActionsShould
         public Task<IReadOnlyList<Booking>> GetPendingRejectionNotificationsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Booking>>([]);
         public Task<int> CancelPendingAsync(Guid bookingId, string requesterUserId, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<int> AcceptPendingAsync(Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> PublishAcceptedAsync(Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<bool> HasOtherActiveBookingsAsync(Guid hallId, DateOnly date, BookingPeriodType periodType, Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<int> ReleasePeriodAsync(Guid hallId, DateOnly date, BookingPeriodType periodType, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<int> ReservePeriodAsync(Guid hallId, DateOnly date, BookingPeriodType periodType, CancellationToken cancellationToken = default) => Task.FromResult(1);
