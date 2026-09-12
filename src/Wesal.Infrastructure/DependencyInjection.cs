@@ -86,6 +86,7 @@ public static class DependencyInjection
         services.AddScoped<IHallInitiationService, HallInitiationService>();
         services.AddScoped<IHallStatusTrackingService, HallStatusTrackingService>();
         services.AddScoped<IOwnerHallService, OwnerHallService>();
+        services.AddScoped<IOwnerAvailabilityService, OwnerAvailabilityService>();
         services.AddScoped<IAdminHallService, AdminHallService>();
         services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
         services.Configure<HallAvailabilityCleanupOptions>(configuration.GetSection(HallAvailabilityCleanupOptions.SectionName));

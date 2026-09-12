@@ -25,6 +25,7 @@ public class OwnerController : ControllerBase
     private readonly IHallStatusTrackingService _hallStatusTrackingService;
     private readonly IOwnerHallService _ownerHallService;
     private readonly IOwnerBookingRequestsService _ownerBookingRequestsService;
+    private readonly IOwnerAvailabilityService _ownerAvailabilityService;
 
     public OwnerController(
         IOwnerSidebarService sidebarService,
@@ -32,7 +33,8 @@ public class OwnerController : ControllerBase
         IHallInitiationService hallInitiationService,
         IHallStatusTrackingService hallStatusTrackingService,
         IOwnerHallService ownerHallService,
-        IOwnerBookingRequestsService ownerBookingRequestsService)
+        IOwnerBookingRequestsService ownerBookingRequestsService,
+        IOwnerAvailabilityService ownerAvailabilityService)
     {
         _sidebarService = sidebarService;
         _hallCreationService = hallCreationService;
@@ -40,6 +42,7 @@ public class OwnerController : ControllerBase
         _hallStatusTrackingService = hallStatusTrackingService;
         _ownerHallService = ownerHallService;
         _ownerBookingRequestsService = ownerBookingRequestsService;
+        _ownerAvailabilityService = ownerAvailabilityService;
     }
 
     /// <summary>
@@ -183,6 +186,47 @@ public class OwnerController : ControllerBase
     {
         await _ownerHallService.DeleteOwnedHallAsync(hallId, cancellationToken);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Returns the availability calendar for the authenticated Hall Owner's own
+    /// hall (US-OWNER-18). Both predefined daily booking periods are returned
+    /// independently per day. Ownership is resolved server-side.
+    /// </summary>
+    [HttpGet("halls/{hallId:guid}/availability")]
+    [ProducesResponseType(typeof(OwnerAvailabilityCalendarDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OwnerAvailabilityCalendarDto>> GetOwnedHallAvailability(
+        Guid hallId,
+        [FromQuery] DateOnly fromDate,
+        [FromQuery] DateOnly toDate,
+        CancellationToken cancellationToken)
+    {
+        var response = await _ownerAvailabilityService.GetAvailabilityAsync(hallId, fromDate, toDate, cancellationToken);
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Updates an individual booking period's availability for the authenticated
+    /// Hall Owner's own hall (US-OWNER-18). Periods are independent; only the
+    /// requested period is modified. Genuinely reserved periods cannot be released.
+    /// </summary>
+    [HttpPut("halls/{hallId:guid}/availability")]
+    [ProducesResponseType(typeof(OwnerAvailabilityPeriodDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<OwnerAvailabilityPeriodDto>> UpdateOwnedHallAvailability(
+        Guid hallId,
+        [FromBody] UpdateOwnerAvailabilityRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await _ownerAvailabilityService.UpdateAvailabilityAsync(hallId, request, cancellationToken);
+        return Ok(response);
     }
 
     [HttpPost("halls")]
