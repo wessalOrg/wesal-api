@@ -152,6 +152,32 @@ public sealed class BookingRepository : IBookingRepository
         return 1;
     }
 
+    public async Task<int> DeleteAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsRelational())
+        {
+            return await _context.Bookings
+                .Where(booking => booking.Id == bookingId)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+
+        var booking = await _context.Bookings
+            .FirstOrDefaultAsync(candidate => candidate.Id == bookingId, cancellationToken);
+
+        if (booking is null)
+        {
+            return 0;
+        }
+
+        _context.Bookings.Remove(booking);
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return 1;
+    }
+
     public async Task<bool> HasOtherActiveBookingsAsync(
         Guid hallId,
         DateOnly date,
