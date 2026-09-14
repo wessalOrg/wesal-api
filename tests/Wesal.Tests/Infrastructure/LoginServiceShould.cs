@@ -20,12 +20,10 @@ public class LoginServiceShould
 
     private static RegisterRequest CreateRegisterRequest(
         string email,
-        string phoneNumber,
         string accountType) => new()
     {
         FullName = "Omar Khaled",
         Email = email,
-        PhoneNumber = phoneNumber,
         Password = Password,
         ConfirmPassword = Password,
         AccountType = accountType
@@ -77,11 +75,11 @@ public class LoginServiceShould
     {
         var (login, registration, _) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("regular@example.com", "+970599111111", AccountTypes.RegularUser));
+            CreateRegisterRequest("regular@example.com", AccountTypes.RegularUser));
 
         var response = await login.LoginAsync(new LoginRequest
         {
-            Identifier = "regular@example.com",
+            Email = "regular@example.com",
             Password = Password
         });
 
@@ -91,7 +89,6 @@ public class LoginServiceShould
         Assert.Equal(ApplicationRoles.RegisteredUser, response.Role);
         Assert.Equal("Omar Khaled", response.FullName);
         Assert.Equal("regular@example.com", response.Email);
-        Assert.Equal("+970599111111", response.PhoneNumber);
         Assert.False(string.IsNullOrEmpty(response.Id));
     }
 
@@ -100,11 +97,11 @@ public class LoginServiceShould
     {
         var (login, registration, _) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("owner@example.com", "+970599222222", AccountTypes.HallOwner));
+            CreateRegisterRequest("owner@example.com", AccountTypes.HallOwner));
 
         var response = await login.LoginAsync(new LoginRequest
         {
-            Identifier = "owner@example.com",
+            Email = "owner@example.com",
             Password = Password
         });
 
@@ -114,27 +111,22 @@ public class LoginServiceShould
     }
 
     [Theory]
-    [InlineData("user@example.com", "+970599333333", AccountTypes.RegularUser)]
-    [InlineData("ownerphone@example.com", "+970599444444", AccountTypes.HallOwner)]
-    public async Task Login_ByPhoneNumber_ReturnsToken(string email, string phoneNumber, string accountType)
+    [InlineData("+970599333333", AccountTypes.RegularUser)]
+    [InlineData("0598333333", AccountTypes.HallOwner)]
+    public async Task Login_ByPhoneNumber_IsRejected(string phoneNumber, string accountType)
     {
         var (login, registration, _) = CreateService();
-        await registration.RegisterAsync(CreateRegisterRequest(email, phoneNumber, accountType));
+        await registration.RegisterAsync(CreateRegisterRequest("user@example.com", accountType));
 
-        var response = await login.LoginAsync(new LoginRequest
-        {
-            Identifier = phoneNumber,
-            Password = Password
-        });
+        // Phone numbers must NOT be accepted as a login identifier.
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            login.LoginAsync(new LoginRequest
+            {
+                Email = phoneNumber,
+                Password = Password
+            }));
 
-        Assert.Equal(email, response.Email);
-        Assert.False(string.IsNullOrWhiteSpace(response.Token));
-
-        var claims = new JwtSecurityTokenHandler().ReadJwtToken(response.Token).Claims
-            .ToDictionary(claim => claim.Type, claim => claim.Value);
-        Assert.Equal(accountType == AccountTypes.RegularUser ? AccountTypes.RegularUser : AccountTypes.HallOwner, response.AccountType);
-        Assert.Contains(claims, claim => claim.Key == ApplicationClaimTypes.UserId && claim.Value == response.Id);
-        Assert.Contains(claims, claim => claim.Key == ApplicationClaimTypes.Role && claim.Value == response.Role);
+        Assert.True(exception.Errors.ContainsKey("Email"));
     }
 
     [Fact]
@@ -142,11 +134,11 @@ public class LoginServiceShould
     {
         var (login, registration, _) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("Case.User@Example.com", "+970599555555", AccountTypes.RegularUser));
+            CreateRegisterRequest("Case.User@Example.com", AccountTypes.RegularUser));
 
         var response = await login.LoginAsync(new LoginRequest
         {
-            Identifier = "case.user@example.com",
+            Email = "case.user@example.com",
             Password = Password
         });
 
@@ -159,12 +151,12 @@ public class LoginServiceShould
     {
         var (login, registration, context) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("wrongpass@example.com", "+970599666666", AccountTypes.RegularUser));
+            CreateRegisterRequest("wrongpass@example.com", AccountTypes.RegularUser));
 
         var exception = await Assert.ThrowsAsync<ValidationException>(() =>
             login.LoginAsync(new LoginRequest
             {
-                Identifier = "wrongpass@example.com",
+                Email = "wrongpass@example.com",
                 Password = "WrongPassword1!"
             }));
 
@@ -184,47 +176,46 @@ public class LoginServiceShould
         var unknownException = await Assert.ThrowsAsync<ValidationException>(() =>
             login.LoginAsync(new LoginRequest
             {
-                Identifier = "nobody@example.com",
+                Email = "nobody@example.com",
                 Password = Password
             }));
-        // Unknown email should map to Identifier/Email field
-        Assert.True(unknownException.Errors.ContainsKey("Identifier") || unknownException.Errors.ContainsKey("Email"));
+        // Unknown email should map to Email field
+        Assert.True(unknownException.Errors.ContainsKey("Email"));
         Assert.Contains(unknownException.Errors.Values.SelectMany(v => v), msg => msg.Contains("not registered", StringComparison.OrdinalIgnoreCase));
 
         // Wrong password should map to Password field
         var (login2, registration2, _) = CreateService();
-        await registration2.RegisterAsync(CreateRegisterRequest("regular2@example.com", "+970599000001", AccountTypes.RegularUser));
+        await registration2.RegisterAsync(CreateRegisterRequest("regular2@example.com", AccountTypes.RegularUser));
         var wrongPasswordException = await Assert.ThrowsAsync<ValidationException>(() =>
             login2.LoginAsync(new LoginRequest
             {
-                Identifier = "regular2@example.com",
+                Email = "regular2@example.com",
                 Password = "WrongPassword1!"
             }));
         Assert.True(wrongPasswordException.Errors.ContainsKey("Password"));
     }
 
     [Fact]
-    public async Task Login_UnknownPhoneNumber_ThrowsUnauthorizedExceptionWithoutEnumerating()
+    public async Task Login_PhoneNumberCannotBeUsedAsIdentifier_ThrowsWithEmailField()
     {
-        var (login, registration, _) = CreateService();
-        await registration.RegisterAsync(
-            CreateRegisterRequest("known@example.com", "+970599123456", AccountTypes.RegularUser));
+        var (login, _, _) = CreateService();
 
-        var ex1 = await Assert.ThrowsAsync<ValidationException>(() =>
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             login.LoginAsync(new LoginRequest
             {
-                Identifier = "unknown-phone",
+                Email = "unknown-phone",
                 Password = Password
             }));
-        Assert.True(ex1.Errors.ContainsKey("Identifier") || ex1.Errors.ContainsKey("PhoneNumber"));
+        Assert.True(ex.Errors.ContainsKey("Email"));
+        Assert.False(ex.Errors.ContainsKey("PhoneNumber"));
 
         var ex2 = await Assert.ThrowsAsync<ValidationException>(() =>
             login.LoginAsync(new LoginRequest
             {
-                Identifier = "+000000000000",
+                Email = "+000000000000",
                 Password = Password
             }));
-        Assert.True(ex2.Errors.ContainsKey("Identifier") || ex2.Errors.ContainsKey("PhoneNumber"));
+        Assert.True(ex2.Errors.ContainsKey("Email"));
     }
 
     [Fact]
@@ -232,21 +223,21 @@ public class LoginServiceShould
     {
         var (login, registration, context) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("recovery@example.com", "+970599777777", AccountTypes.RegularUser));
+            CreateRegisterRequest("recovery@example.com", AccountTypes.RegularUser));
 
         for (var attempt = 0; attempt < 4; attempt++)
         {
             await Assert.ThrowsAsync<ValidationException>(() =>
                 login.LoginAsync(new LoginRequest
                 {
-                    Identifier = "recovery@example.com",
+                    Email = "recovery@example.com",
                     Password = "WrongPassword1!"
                 }));
         }
 
         var response = await login.LoginAsync(new LoginRequest
         {
-            Identifier = "recovery@example.com",
+            Email = "recovery@example.com",
             Password = Password
         });
 
@@ -262,14 +253,14 @@ public class LoginServiceShould
     {
         var (login, registration, context) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("locked@example.com", "+970599888888", AccountTypes.RegularUser));
+            CreateRegisterRequest("locked@example.com", AccountTypes.RegularUser));
 
         for (var attempt = 0; attempt < 4; attempt++)
         {
             await Assert.ThrowsAsync<ValidationException>(() =>
                 login.LoginAsync(new LoginRequest
                 {
-                    Identifier = "locked@example.com",
+                    Email = "locked@example.com",
                     Password = "WrongPassword1!"
                 }));
         }
@@ -277,7 +268,7 @@ public class LoginServiceShould
         var exception = await Assert.ThrowsAsync<BusinessRuleException>(() =>
             login.LoginAsync(new LoginRequest
             {
-                Identifier = "locked@example.com",
+                Email = "locked@example.com",
                 Password = "WrongPassword1!"
             }));
 
@@ -294,7 +285,7 @@ public class LoginServiceShould
     {
         var (login, registration, context) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("blocked@example.com", "+970599999999", AccountTypes.RegularUser));
+            CreateRegisterRequest("blocked@example.com", AccountTypes.RegularUser));
 
         var user = await context.Users.SingleAsync(item => item.Email == "blocked@example.com");
         user.LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(30);
@@ -303,7 +294,7 @@ public class LoginServiceShould
         var exception = await Assert.ThrowsAsync<BusinessRuleException>(() =>
             login.LoginAsync(new LoginRequest
             {
-                Identifier = "blocked@example.com",
+                Email = "blocked@example.com",
                 Password = Password
             }));
 
@@ -317,7 +308,7 @@ public class LoginServiceShould
     {
         var (login, registration, context) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("expired@example.com", "+970599000000", AccountTypes.RegularUser));
+            CreateRegisterRequest("expired@example.com", AccountTypes.RegularUser));
 
         var user = await context.Users.SingleAsync(item => item.Email == "expired@example.com");
         user.LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(-1);
@@ -325,7 +316,7 @@ public class LoginServiceShould
 
         var response = await login.LoginAsync(new LoginRequest
         {
-            Identifier = "expired@example.com",
+            Email = "expired@example.com",
             Password = Password
         });
 
@@ -333,15 +324,15 @@ public class LoginServiceShould
     }
 
     [Fact]
-    public async Task Login_WhitespaceSurroundingIdentifier_TrimsAndSucceeds()
+    public async Task Login_WhitespaceSurroundingEmail_TrimsAndSucceeds()
     {
         var (login, registration, _) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("spaces@example.com", "+970599555000", AccountTypes.RegularUser));
+            CreateRegisterRequest("spaces@example.com", AccountTypes.RegularUser));
 
         var response = await login.LoginAsync(new LoginRequest
         {
-            Identifier = "  spaces@example.com  ",
+            Email = "  spaces@example.com  ",
             Password = Password
         });
 
