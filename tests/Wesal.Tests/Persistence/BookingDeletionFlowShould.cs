@@ -376,6 +376,7 @@ public class BookingDeletionFlowShould
             Id = id,
             Name = $"Grand Hall {id}",
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             OwnerId = "owner-1"
         };
 

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
 using Wesal.Application.Common.Models;
+using Wesal.Domain.Common;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Exceptions;
 using Wesal.Infrastructure.Identity;
@@ -39,6 +40,15 @@ public sealed class OwnerBookingRequestsService : IOwnerBookingRequestsService
         cancellationToken.ThrowIfCancellationRequested();
 
         var ownerId = await ResolveOwnerAsync(cancellationToken);
+
+        var hall = await _ownerDashboardRepository.GetOwnedHallAsync(hallId, ownerId, cancellationToken);
+
+        if (hall is null)
+        {
+            throw new NotFoundException(nameof(Hall), hallId);
+        }
+
+        HallManagementAccess.EnsureAllowed(hall);
 
         var requests = await _ownerDashboardRepository.GetBookingRequestsAsync(hallId, ownerId, cancellationToken);
 

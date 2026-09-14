@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
 using Wesal.Application.Common.Models;
+using Wesal.Domain.Common;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
 using Wesal.Domain.Exceptions;
@@ -48,6 +49,8 @@ public sealed class OwnerAvailabilityService : IOwnerAvailabilityService
         if (hall is null)
             throw new NotFoundException(nameof(Hall), hallId);
 
+        HallManagementAccess.EnsureAllowed(hall);
+
         var periods = await _hallRepository.GetBookingPeriodsAsync([hallId], cancellationToken);
         var availability = await _hallRepository.GetAvailabilityAsync([hallId], fromDate, toDate, cancellationToken);
         var availabilityByKey = availability.ToDictionary(a => (a.Date, a.PeriodType), a => a.Status);
@@ -78,6 +81,8 @@ public sealed class OwnerAvailabilityService : IOwnerAvailabilityService
         var hall = await _ownerDashboardRepository.GetOwnedHallForUpdateAsync(hallId, ownerId, cancellationToken);
         if (hall is null)
             throw new NotFoundException(nameof(Hall), hallId);
+
+        HallManagementAccess.EnsureAllowed(hall);
 
         var periods = await _hallRepository.GetBookingPeriodsAsync([hallId], cancellationToken);
         var template = periods.FirstOrDefault(p => p.Type == request.PeriodType);

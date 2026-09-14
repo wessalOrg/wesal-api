@@ -415,6 +415,7 @@ public class BookingRejectionServiceShould
             Id = Guid.NewGuid(),
             Name = "Grand Hall",
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             OwnerId = OwnerId
         };
 

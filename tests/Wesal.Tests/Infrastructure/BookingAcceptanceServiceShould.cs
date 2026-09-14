@@ -242,6 +242,7 @@ public class BookingAcceptanceServiceShould
             Id = Guid.NewGuid(),
             Name = "Grand Hall",
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             OwnerId = HallOwnerId
         };
 

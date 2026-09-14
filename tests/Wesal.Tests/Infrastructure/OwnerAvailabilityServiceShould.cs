@@ -69,6 +69,7 @@ public class OwnerAvailabilityServiceShould : IDisposable
             Description = "Spacious hall",
             OwnerId = ownerId,
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             IsDeleted = false
         };
         _context.Halls.Add(hall);

@@ -1,6 +1,7 @@
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
 using Wesal.Application.Common.Models;
+using Wesal.Domain.Common;
 using Wesal.Domain.Constants;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
@@ -62,6 +63,8 @@ public sealed class BookingPublishingService : IBookingPublishingService
         }
 
         EnsureHallOwnership(booking);
+
+        HallManagementAccess.EnsureAllowed(booking.Hall!);
 
         EnsurePublishable(booking);
 

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
 using Wesal.Application.Common.Models;
+using Wesal.Domain.Common;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
 using Wesal.Domain.Exceptions;
@@ -14,9 +15,12 @@ namespace Wesal.Infrastructure.OwnerDashboard;
 /// Retrieves and updates a hall owned by the authenticated Hall Owner (US-OWNER-07,
 /// FR-HALL-02). The owner is resolved exclusively from the authenticated session;
 /// ownership is enforced by the repository so a caller can never read or update
-/// another owner's hall. The update is applied atomically in a single transaction and
-/// never touches the hall's approval status or owner identity. Editing is blocked
-/// while the hall is under Admin review (PendingReview).
+/// another owner's hall. Management access is gated by <see cref="HallManagementAccess"/>
+/// (US-ADMIN-05/07/09) and editing is blocked while the hall is under Admin review
+/// (PendingReview). The update is applied atomically in a single transaction and
+/// never touches the hall's approval status or owner identity — except for the
+/// resubmission rule (FR-ADM-01): editing a Rejected hall re-queues it to
+/// PendingReview.
 /// </summary>
 public sealed class OwnerHallService : IOwnerHallService
 {
@@ -74,6 +78,7 @@ public sealed class OwnerHallService : IOwnerHallService
             throw new NotFoundException(nameof(Hall), hallId);
         }
 
+        HallManagementAccess.EnsureAllowed(hall);
         EnsureEditable(hall);
 
         IWesalTransaction? transaction = null;
@@ -83,6 +88,14 @@ public sealed class OwnerHallService : IOwnerHallService
             transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             ApplyHallDetails(hall, request);
+
+            // Resubmission (FR-ADM-01, US-ADMIN-03): editing a Rejected hall re-queues
+            // it for review. Editing an Approved or PendingReview hall never changes
+            // its approval state.
+            if (hall.Status == HallStatus.Rejected)
+            {
+                hall.Status = HallStatus.PendingReview;
+            }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -122,6 +135,8 @@ public sealed class OwnerHallService : IOwnerHallService
         {
             throw new NotFoundException(nameof(Hall), hallId);
         }
+
+        HallManagementAccess.EnsureAllowed(hall);
 
         hall.IsDeleted = true;
         hall.UpdatedAt = DateTimeOffset.UtcNow;
@@ -186,9 +201,9 @@ public sealed class OwnerHallService : IOwnerHallService
 
     private static void EnsureEditable(Hall hall)
     {
-        // The domain has no Admin lock/subscription-lock flag yet; a hall is
-        // non-editable while it is under Admin review (PendingReview). Locked states
-        // (US-OWNER-17) will be enforced here when those fields exist on the entity.
+        // Editing is blocked while the hall is under Admin review (PendingReview).
+        // The management-access gate (HallManagementAccess, US-ADMIN-05/07/09) is
+        // enforced before this check so a locked hall surfaces the correct lock code.
         if (hall.Status == HallStatus.PendingReview)
         {
             throw new BusinessRuleException(
