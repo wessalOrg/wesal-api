@@ -7,11 +7,14 @@ using Wesal.Domain.Enums;
 using Wesal.Infrastructure.Admin;
 using Wesal.Infrastructure.Search;
 using Wesal.Persistence.Data;
+using Wesal.Persistence.Repositories;
 
 namespace Wesal.Tests.Infrastructure;
 
 public class AdminHallServiceShould : IDisposable
 {
+    private static readonly DateTimeOffset FixedNow = new(2026, 8, 15, 10, 0, 0, TimeSpan.Zero);
+
     private readonly ServiceProvider _provider;
     private readonly ApplicationDbContext _context;
     private readonly AdminHallService _service;
@@ -26,8 +29,19 @@ public class AdminHallServiceShould : IDisposable
         _context = _provider.GetRequiredService<ApplicationDbContext>();
         _context.Database.EnsureCreated();
         _indexer = new HallSearchIndexer(NullLogger<HallSearchIndexer>.Instance);
-        _service = new AdminHallService(new TestHallRepository(_context), new TestUnitOfWork(_context), _indexer, NullLogger<AdminHallService>.Instance);
+        _service = CreateService(_indexer);
     }
+
+    private AdminHallService CreateService(IHallSearchIndexer indexer)
+        => new(
+            new TestHallRepository(_context),
+            new TestUnitOfWork(_context),
+            indexer,
+            new ConversationRepository(_context),
+            new MessageRepository(_context),
+            new FakeCurrentUser("admin-1", true, "Admin"),
+            new FakeDateTime(),
+            NullLogger<AdminHallService>.Instance);
 
     private class TestHallRepository : Wesal.Application.Common.Interfaces.Persistence.IHallRepository
     {
@@ -100,7 +114,7 @@ public class AdminHallServiceShould : IDisposable
     {
         var hall = CreateHall(HallStatus.PendingReview);
         var failingIndexer = new FailingIndexer();
-        var failingService = new AdminHallService(new TestHallRepository(_context), new TestUnitOfWork(_context), failingIndexer, NullLogger<AdminHallService>.Instance);
+        var failingService = CreateService(failingIndexer);
         var result = await failingService.ApproveHallAsync(hall.Id);
         Assert.Equal(HallStatus.Approved, result.Status);
         var reloaded = await _context.Halls.FindAsync(hall.Id);
@@ -119,11 +133,73 @@ public class AdminHallServiceShould : IDisposable
         Assert.True(await _indexer.IsIndexedAsync(hall.Id));
     }
 
+    [Fact]
+    public async Task Approve_NotifiesOwner_OnlyOnce()
+    {
+        var hall = CreateHall(HallStatus.PendingReview);
+        var first = await _service.ApproveHallAsync(hall.Id);
+        Assert.Equal(HallStatus.Approved, first.Status);
+        var messagesAfterFirst = _context.Messages
+            .Join(_context.Conversations, m => m.ConversationId, c => c.Id, (m, c) => new { m, c })
+            .Where(x => x.c.HallId == hall.Id && x.m.SenderUserId == "admin-1")
+            .Select(x => x.m.Content)
+            .ToList();
+        Assert.Single(messagesAfterFirst);
+        Assert.Contains("approved", messagesAfterFirst[0], StringComparison.OrdinalIgnoreCase);
+
+        var second = await _service.ApproveHallAsync(hall.Id);
+        Assert.Equal(HallStatus.Approved, second.Status);
+        var messagesAfterSecond = _context.Messages
+            .Join(_context.Conversations, m => m.ConversationId, c => c.Id, (m, c) => new { m, c })
+            .Where(x => x.c.HallId == hall.Id && x.m.SenderUserId == "admin-1")
+            .Select(x => x.m.Content)
+            .ToList();
+        Assert.Single(messagesAfterSecond);
+    }
+
+    [Fact]
+    public async Task Approve_VisibleInPublicSearchQueries_AfterApproval()
+    {
+        var hall = CreateHall(HallStatus.PendingReview);
+        var paginatedBefore = await _context.Halls
+            .Where(h => h.Status == HallStatus.Approved && !h.IsDeleted)
+            .ToListAsync();
+        Assert.DoesNotContain(paginatedBefore, h => h.Id == hall.Id);
+
+        await _service.ApproveHallAsync(hall.Id);
+
+        var paginatedAfter = await _context.Halls
+            .Where(h => h.Status == HallStatus.Approved && !h.IsDeleted)
+            .ToListAsync();
+        Assert.Contains(paginatedAfter, h => h.Id == hall.Id);
+    }
+
     private class FailingIndexer : IHallSearchIndexer
     {
         public Task IndexHallAsync(Wesal.Application.Common.Models.HallSearchIndexDto hall, CancellationToken cancellationToken = default) => throw new Exception("Search unavailable");
         public Task<bool> IsIndexedAsync(Guid hallId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task RetryPendingAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FakeCurrentUser : ICurrentUserService
+    {
+        public FakeCurrentUser(string userId, bool authenticated, string role)
+        {
+            UserId = userId;
+            IsAuthenticated = authenticated;
+            Roles = [role];
+        }
+
+        public string? UserId { get; }
+        public string? UserName => UserId;
+        public string? Email => null;
+        public bool IsAuthenticated { get; }
+        public IReadOnlyList<string> Roles { get; }
+    }
+
+    private sealed class FakeDateTime : IDateTime
+    {
+        public DateTimeOffset Now => FixedNow;
     }
 
     public void Dispose()

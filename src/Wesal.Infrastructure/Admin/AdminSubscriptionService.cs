@@ -1,6 +1,12 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
 using Wesal.Application.Common.Models;
+using Wesal.Domain.Entities;
+using Wesal.Domain.Enums;
+using Wesal.Domain.Exceptions;
+using Wesal.Infrastructure.AiAssistant;
 
 namespace Wesal.Infrastructure.Admin;
 
@@ -12,17 +18,32 @@ namespace Wesal.Infrastructure.Admin;
 /// persisted hall records on every call, so the dashboard never shows stale lock or
 /// payment state before an Admin acts (the inline Lock/Unlock/Paid actions remain the
 /// existing US-ADMIN-05/06/10 endpoints — no parallel duplicates are created here).
+///
+/// Marking a subscription as paid (US-ADMIN-10, FR-SUB-04) is only valid for an
+/// Approved hall, sets PaymentStatus = Paid, clears the automatic SystemLocked flag,
+/// and starts a fresh 30-day / 120-ILS cycle (StartDate = today, EndDate = today + 30).
+/// The independent manual <see cref="Wesal.Domain.Entities.Hall.IsAdminLocked"/> flag is
+/// never touched — an unpaid subscription's lock is lifted by payment confirmation only.
 /// </summary>
 public sealed class AdminSubscriptionService : IAdminSubscriptionService
 {
     private readonly IAdminDashboardRepository _adminDashboardRepository;
+    private readonly IHallRepository _hallRepository;
+    private readonly IOptions<SubscriptionPaymentOptions> _subscriptionPaymentOptions;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTime _dateTime;
 
     public AdminSubscriptionService(
         IAdminDashboardRepository adminDashboardRepository,
+        IHallRepository hallRepository,
+        IOptions<SubscriptionPaymentOptions> subscriptionPaymentOptions,
+        IUnitOfWork unitOfWork,
         IDateTime dateTime)
     {
         _adminDashboardRepository = adminDashboardRepository;
+        _hallRepository = hallRepository;
+        _subscriptionPaymentOptions = subscriptionPaymentOptions;
+        _unitOfWork = unitOfWork;
         _dateTime = dateTime;
     }
 
@@ -59,6 +80,73 @@ public sealed class AdminSubscriptionService : IAdminSubscriptionService
             .ToList();
 
         return OrderGroups(groups, query.SortBy);
+    }
+
+    public async Task<AdminMarkPaidResultDto> MarkSubscriptionPaidAsync(
+        Guid hallId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var hall = await _hallRepository.GetHallByIdForUpdateAsync(hallId, cancellationToken);
+
+        if (hall is null || hall.IsDeleted)
+        {
+            throw new NotFoundException(nameof(Hall), hallId);
+        }
+
+        if (hall.Status != HallStatus.Approved)
+        {
+            throw new BusinessRuleException(
+                "HallNotApproved",
+                $"Only an Approved hall can be marked as paid; hall {hallId} has status {hall.Status}.");
+        }
+
+        var today = DateOnly.FromDateTime(_dateTime.Now.UtcDateTime);
+
+        if (hall.PaymentStatus == HallPaymentStatus.Paid
+            && hall.SubscriptionCycleEnd is not null
+            && hall.SubscriptionCycleEnd >= today)
+        {
+            // Idempotent no-op: the hall already has a confirmed, still-active cycle.
+            // A second call must never create an overlapping cycle or clear a separate
+            // manual Admin lock.
+            return new AdminMarkPaidResultDto
+            {
+                HallId = hall.Id,
+                Name = hall.Name,
+                PaymentStatus = hall.PaymentStatus,
+                SystemLocked = hall.SystemLocked,
+                AdminLocked = hall.IsAdminLocked,
+                CycleStart = hall.SubscriptionCycleStart,
+                CycleEnd = hall.SubscriptionCycleEnd,
+                AmountIls = _subscriptionPaymentOptions.Value.SubscriptionPriceIls,
+                AlreadyPaidWithActiveCycle = true
+            };
+        }
+
+        var cycleDays = _subscriptionPaymentOptions.Value.SubscriptionCycleDays;
+
+        hall.PaymentStatus = HallPaymentStatus.Paid;
+        hall.SystemLocked = false;
+        hall.SubscriptionCycleStart = today;
+        hall.SubscriptionCycleEnd = today.AddDays(cycleDays);
+        hall.UpdatedAt = _dateTime.Now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new AdminMarkPaidResultDto
+        {
+            HallId = hall.Id,
+            Name = hall.Name,
+            PaymentStatus = hall.PaymentStatus,
+            SystemLocked = hall.SystemLocked,
+            AdminLocked = hall.IsAdminLocked,
+            CycleStart = hall.SubscriptionCycleStart,
+            CycleEnd = hall.SubscriptionCycleEnd,
+            AmountIls = _subscriptionPaymentOptions.Value.SubscriptionPriceIls,
+            AlreadyPaidWithActiveCycle = false
+        };
     }
 
     private static List<AdminSubscriptionHallDto> OrderHalls(

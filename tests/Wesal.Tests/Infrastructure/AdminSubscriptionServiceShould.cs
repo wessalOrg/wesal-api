@@ -2,12 +2,15 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Models;
 using Wesal.Domain.Constants;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
+using Wesal.Domain.Exceptions;
 using Wesal.Infrastructure.Admin;
+using Wesal.Infrastructure.AiAssistant;
 using Wesal.Infrastructure.Identity;
 using Wesal.Persistence.Data;
 using Wesal.Persistence.Repositories;
@@ -87,7 +90,17 @@ public class AdminSubscriptionServiceShould : IDisposable
     }
 
     private AdminSubscriptionService CreateService()
-        => new(new AdminDashboardRepository(_context), new FakeDateTime());
+        => new(
+            new AdminDashboardRepository(_context),
+            new HallRepository(_context),
+            Options.Create(new SubscriptionPaymentOptions
+            {
+                SubscriptionPriceIls = 120m,
+                SubscriptionCycleDays = 30,
+                AdminWhatsAppContact = SubscriptionPaymentOptions.DefaultAdminWhatsApp
+            }),
+            new UnitOfWork(_context),
+            new FakeDateTime());
 
     // --- US-ADMIN-11: subscription overview ---
 
@@ -211,6 +224,79 @@ public class AdminSubscriptionServiceShould : IDisposable
 
         var halls = result.SelectMany(g => g.Halls);
         Assert.Equal(-3, halls.Single().DaysRemaining);
+    }
+
+    // --- US-ADMIN-10: mark a hall's subscription as paid ---
+
+    [Fact]
+    public async Task MarkPaid_ApprovedUnpaid_StartsCycle_AndClearsSystemLock()
+    {
+        AddOwner("owner-1", "Alaa Owner", "+970111", "alaa@example.com");
+        var hall = AddHall("My Hall", "owner-1", status: HallStatus.Approved, payment: HallPaymentStatus.Unpaid, systemLocked: true);
+
+        var result = await CreateService().MarkSubscriptionPaidAsync(hall.Id);
+
+        Assert.Equal(HallPaymentStatus.Paid, result.PaymentStatus);
+        Assert.False(result.SystemLocked);
+        Assert.Equal(Today, result.CycleStart);
+        Assert.Equal(Today.AddDays(30), result.CycleEnd);
+        Assert.Equal(120m, result.AmountIls);
+        Assert.False(result.AlreadyPaidWithActiveCycle);
+
+        var reloaded = await _context.Halls.FindAsync(hall.Id);
+        Assert.Equal(HallPaymentStatus.Paid, reloaded!.PaymentStatus);
+        Assert.False(reloaded.SystemLocked);
+        Assert.Equal(Today, reloaded.SubscriptionCycleStart);
+        Assert.Equal(Today.AddDays(30), reloaded.SubscriptionCycleEnd);
+    }
+
+    [Fact]
+    public async Task MarkPaid_AlreadyPaidWithActiveCycle_IsIdempotent()
+    {
+        AddOwner("owner-1", "Alaa Owner", "+970111", "alaa@example.com");
+        var hall = AddHall("My Hall", "owner-1", status: HallStatus.Approved, payment: HallPaymentStatus.Paid, cycleEnd: Today.AddDays(20));
+
+        var result = await CreateService().MarkSubscriptionPaidAsync(hall.Id);
+
+        Assert.True(result.AlreadyPaidWithActiveCycle);
+        Assert.Equal(Today.AddDays(20), result.CycleEnd);
+
+        var reloaded = await _context.Halls.FindAsync(hall.Id);
+        Assert.Equal(Today.AddDays(20), reloaded!.SubscriptionCycleEnd);
+    }
+
+    [Fact]
+    public async Task MarkPaid_ClearsSystemLock_ButNeverTouchesAdminLocked()
+    {
+        AddOwner("owner-1", "Alaa Owner", "+970111", "alaa@example.com");
+        var hall = AddHall("My Hall", "owner-1", status: HallStatus.Approved, payment: HallPaymentStatus.Unpaid, systemLocked: true, isAdminLocked: true);
+
+        var result = await CreateService().MarkSubscriptionPaidAsync(hall.Id);
+
+        Assert.True(result.AdminLocked);
+
+        var reloaded = await _context.Halls.FindAsync(hall.Id);
+        Assert.True(reloaded!.IsAdminLocked);
+        Assert.False(reloaded.SystemLocked);
+    }
+
+    [Fact]
+    public async Task MarkPaid_NotApproved_ThrowsBusinessRule()
+    {
+        AddOwner("owner-1", "Alaa Owner", "+970111", "alaa@example.com");
+        var hall = AddHall("Pending Hall", "owner-1", status: HallStatus.PendingReview);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            CreateService().MarkSubscriptionPaidAsync(hall.Id));
+
+        Assert.Equal("HallNotApproved", ex.Code);
+    }
+
+    [Fact]
+    public async Task MarkPaid_NonExistentHall_ThrowsNotFound()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            CreateService().MarkSubscriptionPaidAsync(Guid.NewGuid()));
     }
 
     public void Dispose()

@@ -26,6 +26,8 @@ using Wesal.Infrastructure.OwnerDashboard;
 using Wesal.Infrastructure.Profile;
 using Wesal.Infrastructure.Search;
 using Wesal.Infrastructure.Time;
+using Wesal.Infrastructure.Email;
+using Wesal.Infrastructure.Warnings;
 
 namespace Wesal.Infrastructure;
 
@@ -94,6 +96,11 @@ public static class DependencyInjection
         services.AddScoped<ISubscriptionExpiryLockService, SubscriptionExpiryLockService>();
         services.Configure<SubscriptionExpiryLockOptions>(configuration.GetSection(SubscriptionExpiryLockOptions.SectionName));
         services.AddHostedService<SubscriptionExpiryLockBackgroundService>();
+        services.AddScoped<IEmailService, EmailService>();
+        services.Configure<EmailOptions>(configuration.GetSection(EmailOptions.SectionName));
+        services.AddScoped<ISubscriptionExpiryWarningService, SubscriptionExpiryWarningService>();
+        services.Configure<SubscriptionExpiryWarningOptions>(configuration.GetSection(SubscriptionExpiryWarningOptions.SectionName));
+        services.AddHostedService<SubscriptionExpiryWarningBackgroundService>();
         services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
         services.Configure<HallAvailabilityCleanupOptions>(configuration.GetSection(HallAvailabilityCleanupOptions.SectionName));
         services.AddHostedService<HallAvailabilityCleanupBackgroundService>();

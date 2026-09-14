@@ -129,4 +129,34 @@ public class AdminDashboardRepository : IAdminDashboardRepository
                 && hall.SubscriptionCycleEnd < today)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<Hall>> GetSubscriptionExpiryWarningCandidatesAsync(
+        DateOnly today,
+        int warningDays,
+        CancellationToken cancellationToken = default)
+    {
+        var triggerDate = today.AddDays(warningDays);
+
+        return await _context.Halls
+            .Where(hall => !hall.IsDeleted
+                && hall.Status == HallStatus.Approved
+                && hall.PaymentStatus == HallPaymentStatus.Paid
+                && hall.SubscriptionCycleEnd != null
+                && ((hall.SubscriptionCycleEnd == triggerDate && hall.WarningSentForCycleEnd != hall.SubscriptionCycleEnd)
+                    || (hall.WarningSentForCycleEnd == hall.SubscriptionCycleEnd
+                        && hall.WarningSentAttempts > 0
+                        && hall.SubscriptionCycleEnd > today)))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<string?> GetUserEmailAsync(
+        string userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.Users
+            .AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.Email)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
 }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
@@ -5,7 +6,9 @@ using Wesal.Application.Common.Models;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
 using Wesal.Domain.Exceptions;
+using Wesal.Infrastructure.Conversations;
 using Wesal.Infrastructure.Halls;
+using Wesal.Infrastructure.Identity;
 
 namespace Wesal.Infrastructure.Admin;
 
@@ -20,6 +23,13 @@ namespace Wesal.Infrastructure.Admin;
 /// delivered to the owner's Messages inbox via a hall-scoped conversation that stays
 /// open so the owner can reply. The manual lock records the acting Admin and timestamp
 /// and never touches PaymentStatus or SystemLocked (FR-SUB-05).
+///
+/// Unlock (US-ADMIN-06, FR-SUB-05) clears only the manual Admin lock, records the
+/// acting Admin and timestamp, then re-reads the hall's combined lock state and corrects
+/// any inconsistency a concurrent payment-confirmation race left behind, so restored
+/// access is always reported truthfully. Direct Admin→Owner messaging (US-ADMIN-04)
+/// reuses the system's Conversation/Message domain and SignalR notifications; when the
+/// owner's account is blocked the message is queued and flagged accordingly.
 /// </summary>
 public sealed class AdminHallReviewService : IAdminHallReviewService
 {
@@ -30,6 +40,8 @@ public sealed class AdminHallReviewService : IAdminHallReviewService
     private readonly IMessageRepository _messageRepository;
     private readonly ICurrentUserService _currentUser;
     private readonly IDateTime _dateTime;
+    private readonly IConversationNotifier _notifier;
+    private readonly UserManager<ApplicationUser> _userManager;
     private readonly ILogger<AdminHallReviewService> _logger;
 
     public AdminHallReviewService(
@@ -40,6 +52,8 @@ public sealed class AdminHallReviewService : IAdminHallReviewService
         IMessageRepository messageRepository,
         ICurrentUserService currentUser,
         IDateTime dateTime,
+        IConversationNotifier notifier,
+        UserManager<ApplicationUser> userManager,
         ILogger<AdminHallReviewService> logger)
     {
         _adminDashboardRepository = adminDashboardRepository;
@@ -49,6 +63,8 @@ public sealed class AdminHallReviewService : IAdminHallReviewService
         _messageRepository = messageRepository;
         _currentUser = currentUser;
         _dateTime = dateTime;
+        _notifier = notifier;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -190,6 +206,206 @@ public sealed class AdminHallReviewService : IAdminHallReviewService
             LockedAt = hall.LockedAt,
             LockedByAdminUserId = hall.LockedByAdminUserId
         };
+    }
+
+    public async Task<AdminUnlockHallResultDto> UnlockHallAsync(
+        Guid hallId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var hall = await _hallRepository.GetHallByIdForUpdateAsync(hallId, cancellationToken);
+
+        if (hall is null || hall.IsDeleted)
+        {
+            throw new NotFoundException(nameof(Hall), hallId);
+        }
+
+        if (hall.IsAdminLocked)
+        {
+            var adminId = ResolveAdminUserId();
+
+            hall.IsAdminLocked = false;
+            hall.UnlockedByAdminUserId = adminId;
+            hall.UnlockedAt = _dateTime.Now;
+            hall.UpdatedAt = _dateTime.Now;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Hall {HallId} was unlocked by admin {AdminId}", hall.Id, adminId);
+
+            // Verification step (US-ADMIN-06): re-read the freshest combined lock state
+            // and correct a left-over inconsistency (e.g. SystemLocked still set although
+            // the hall is Paid with an active cycle) so the returned state and the owner's
+            // restored access are truthful.
+            await VerifyUnlockStateAsync(hall.Id, cancellationToken);
+        }
+
+        return new AdminUnlockHallResultDto
+        {
+            HallId = hall.Id,
+            Name = hall.Name,
+            IsLocked = hall.IsAdminLocked,
+            UnlockedAt = hall.UnlockedAt,
+            UnlockedByAdminUserId = hall.UnlockedByAdminUserId,
+            ManagementAccessRestored = !hall.IsAdminLocked
+                && !hall.SystemLocked
+                && hall.PaymentStatus == HallPaymentStatus.Paid
+        };
+    }
+
+    public async Task<AdminOwnerMessageResponseDto> SendMessageToOwnerAsync(
+        Guid hallId,
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new ValidationException("Message content is required.");
+        }
+
+        if (content.Trim().Length > 1000)
+        {
+            throw new ValidationException("Message content must not exceed 1000 characters.");
+        }
+
+        var hall = await _hallRepository.GetHallByIdForUpdateAsync(hallId, cancellationToken);
+
+        if (hall is null || hall.IsDeleted)
+        {
+            throw new NotFoundException(nameof(Hall), hallId);
+        }
+
+        if (string.IsNullOrWhiteSpace(hall.OwnerId))
+        {
+            throw new ValidationException("The hall has no owner to message.");
+        }
+
+        var adminUserId = ResolveAdminUserId();
+
+        var conversation = await _conversationRepository.GetByHallAndUserAsync(hall.Id, adminUserId, cancellationToken);
+
+        if (conversation is null)
+        {
+            conversation = new Conversation
+            {
+                HallId = hall.Id,
+                SenderUserId = adminUserId,
+                HallOwnerId = hall.OwnerId!
+            };
+
+            await _conversationRepository.AddAsync(conversation, cancellationToken);
+        }
+
+        var message = new Message
+        {
+            ConversationId = conversation.Id,
+            SenderUserId = adminUserId,
+            Content = content.Trim()
+        };
+
+        await _messageRepository.AddAsync(message, cancellationToken);
+        await _messageRepository.SaveChangesAsync(cancellationToken);
+
+        var ownerBlocked = await IsOwnerBlockedAsync(hall.OwnerId, cancellationToken);
+
+        if (!ownerBlocked)
+        {
+            var senderName = await ResolveSenderNameAsync(adminUserId, cancellationToken);
+            await TryNotifyRealTimeAsync(conversation.Id, message, senderName, cancellationToken);
+        }
+
+        return new AdminOwnerMessageResponseDto
+        {
+            MessageId = message.Id,
+            ConversationId = conversation.Id,
+            HallId = hall.Id,
+            Content = message.Content,
+            SentAt = message.CreatedAt,
+            OwnerBlocked = ownerBlocked,
+            DeliveryPending = ownerBlocked
+        };
+    }
+
+    private async Task VerifyUnlockStateAsync(Guid hallId, CancellationToken cancellationToken)
+    {
+        var fresh = await _hallRepository.GetHallByIdForUpdateAsync(hallId, cancellationToken);
+
+        if (fresh is null || fresh.IsDeleted)
+        {
+            return;
+        }
+
+        var today = DateOnly.FromDateTime(_dateTime.Now.UtcDateTime);
+
+        // A payment confirmation racing the manual unlock can leave SystemLocked set even
+        // though the hall is Paid with an active cycle. Correct that inconsistency so the
+        // manual unlock restores access as the business rule intends.
+        if (fresh.SystemLocked
+            && fresh.PaymentStatus == HallPaymentStatus.Paid
+            && fresh.SubscriptionCycleEnd is not null
+            && fresh.SubscriptionCycleEnd >= today)
+        {
+            fresh.SystemLocked = false;
+            fresh.UpdatedAt = _dateTime.Now;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Unlock verification corrected a stale SystemLocked flag for hall {HallId}", fresh.Id);
+        }
+    }
+
+    private async Task<bool> IsOwnerBlockedAsync(string ownerId, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        var owner = await _userManager.FindByIdAsync(ownerId);
+
+        if (owner is null)
+        {
+            return false;
+        }
+
+        return await _userManager.IsLockedOutAsync(owner);
+    }
+
+    private async Task<string> ResolveSenderNameAsync(string adminUserId, CancellationToken cancellationToken)
+    {
+        var users = await _conversationRepository.GetUserDisplayNamesAsync([adminUserId], cancellationToken);
+        return users.FirstOrDefault(info => info.UserId == adminUserId)?.FullName ?? string.Empty;
+    }
+
+    private async Task TryNotifyRealTimeAsync(
+        Guid conversationId,
+        Message message,
+        string senderName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _notifier.NotifyMessageSentAsync(new MessageSentEvent
+            {
+                MessageId = message.Id,
+                ConversationId = conversationId,
+                SenderUserId = message.SenderUserId,
+                SenderName = senderName,
+                Content = message.Content,
+                SentAt = message.CreatedAt
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to push the admin message for hall {HallId}", conversationId);
+        }
     }
 
     private string ResolveAdminUserId()

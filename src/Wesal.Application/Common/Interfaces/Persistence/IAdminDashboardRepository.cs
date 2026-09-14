@@ -27,4 +27,13 @@ public interface IAdminDashboardRepository
     Task<IReadOnlyList<Hall>> GetExpiredPaidCyclesAsync(
         DateOnly today,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Hall>> GetSubscriptionExpiryWarningCandidatesAsync(
+        DateOnly today,
+        int warningDays,
+        CancellationToken cancellationToken = default);
+
+    Task<string?> GetUserEmailAsync(
+        string userId,
+        CancellationToken cancellationToken = default);
 }
