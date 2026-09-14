@@ -66,11 +66,10 @@ public class LogoutSessionInvalidationShould
         return (loginService, registrationService, logoutService, revocations, context);
     }
 
-    private static RegisterRequest CreateRegisterRequest(string email, string phoneNumber, string accountType) => new()
+    private static RegisterRequest CreateRegisterRequest(string email, string accountType) => new()
     {
         FullName = "Omar Khaled",
         Email = email,
-        PhoneNumber = phoneNumber,
         Password = Password,
         ConfirmPassword = Password,
         AccountType = accountType
@@ -128,18 +127,17 @@ public class LogoutSessionInvalidationShould
     }
 
     [Theory]
-    [InlineData(AccountTypes.RegularUser, "regular@example.com", "+970599111111", ApplicationRoles.RegisteredUser)]
-    [InlineData(AccountTypes.HallOwner, "owner@example.com", "+970599222222", ApplicationRoles.HallOwner)]
+    [InlineData(AccountTypes.RegularUser, "regular@example.com", ApplicationRoles.RegisteredUser)]
+    [InlineData(AccountTypes.HallOwner, "owner@example.com", ApplicationRoles.HallOwner)]
     public async Task ValidSession_AuthenticatesAgainstProtectedRequestCheck(
         string accountType,
         string email,
-        string phoneNumber,
         string role)
     {
         var (login, registration, _, revocations, _) = CreateService();
-        await registration.RegisterAsync(CreateRegisterRequest(email, phoneNumber, accountType));
+        await registration.RegisterAsync(CreateRegisterRequest(email, accountType));
 
-        var response = await login.LoginAsync(new LoginRequest { Identifier = email, Password = Password });
+        var response = await login.LoginAsync(new LoginRequest { Email = email, Password = Password });
 
         var principal = await AuthenticateWithRevocationCheckAsync(response.Token, revocations);
 
@@ -150,18 +148,17 @@ public class LogoutSessionInvalidationShould
     }
 
     [Theory]
-    [InlineData(AccountTypes.RegularUser, "regular@example.com", "+970599333333", ApplicationRoles.RegisteredUser)]
-    [InlineData(AccountTypes.HallOwner, "owner@example.com", "+970599444444", ApplicationRoles.HallOwner)]
+    [InlineData(AccountTypes.RegularUser, "regular@example.com", ApplicationRoles.RegisteredUser)]
+    [InlineData(AccountTypes.HallOwner, "owner@example.com", ApplicationRoles.HallOwner)]
     public async Task AfterLogout_ReusedToken_IsRejectedForProtectedRequests(
         string accountType,
         string email,
-        string phoneNumber,
         string role)
     {
         var (login, registration, logout, revocations, _) = CreateService();
-        await registration.RegisterAsync(CreateRegisterRequest(email, phoneNumber, accountType));
+        await registration.RegisterAsync(CreateRegisterRequest(email, accountType));
 
-        var response = await login.LoginAsync(new LoginRequest { Identifier = email, Password = Password });
+        var response = await login.LoginAsync(new LoginRequest { Email = email, Password = Password });
 
         var beforeLogout = await AuthenticateWithRevocationCheckAsync(response.Token, revocations);
         Assert.NotNull(beforeLogout);
@@ -211,9 +208,9 @@ public class LogoutSessionInvalidationShould
     {
         var (login, registration, logout, revocations, context) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("repeat@example.com", "+970599555555", AccountTypes.RegularUser));
+            CreateRegisterRequest("repeat@example.com", AccountTypes.RegularUser));
 
-        var response = await login.LoginAsync(new LoginRequest { Identifier = "repeat@example.com", Password = Password });
+        var response = await login.LoginAsync(new LoginRequest { Email = "repeat@example.com", Password = Password });
 
         var principal = await AuthenticateWithRevocationCheckAsync(response.Token, revocations);
         Assert.NotNull(principal);
@@ -231,10 +228,10 @@ public class LogoutSessionInvalidationShould
     {
         var (login, registration, logout, revocations, _) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("multi@example.com", "+970599666666", AccountTypes.RegularUser));
+            CreateRegisterRequest("multi@example.com", AccountTypes.RegularUser));
 
-        var firstLogin = await login.LoginAsync(new LoginRequest { Identifier = "multi@example.com", Password = Password });
-        var secondLogin = await login.LoginAsync(new LoginRequest { Identifier = "multi@example.com", Password = Password });
+        var firstLogin = await login.LoginAsync(new LoginRequest { Email = "multi@example.com", Password = Password });
+        var secondLogin = await login.LoginAsync(new LoginRequest { Email = "multi@example.com", Password = Password });
 
         Assert.NotEqual(firstLogin.Token, secondLogin.Token);
 
@@ -253,9 +250,9 @@ public class LogoutSessionInvalidationShould
     {
         var (login, registration, logout, revocations, _) = CreateService();
         await registration.RegisterAsync(
-            CreateRegisterRequest("relogin@example.com", "+970599777777", AccountTypes.RegularUser));
+            CreateRegisterRequest("relogin@example.com", AccountTypes.RegularUser));
 
-        var firstLogin = await login.LoginAsync(new LoginRequest { Identifier = "relogin@example.com", Password = Password });
+        var firstLogin = await login.LoginAsync(new LoginRequest { Email = "relogin@example.com", Password = Password });
 
         var firstPrincipal = await AuthenticateWithRevocationCheckAsync(firstLogin.Token, revocations);
         Assert.NotNull(firstPrincipal);
@@ -264,7 +261,7 @@ public class LogoutSessionInvalidationShould
 
         Assert.Null(await AuthenticateWithRevocationCheckAsync(firstLogin.Token, revocations));
 
-        var secondLogin = await login.LoginAsync(new LoginRequest { Identifier = "relogin@example.com", Password = Password });
+        var secondLogin = await login.LoginAsync(new LoginRequest { Email = "relogin@example.com", Password = Password });
 
         Assert.NotEqual(firstLogin.Token, secondLogin.Token);
         Assert.NotNull(await AuthenticateWithRevocationCheckAsync(secondLogin.Token, revocations));
