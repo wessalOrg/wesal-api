@@ -2,6 +2,7 @@ using System.Globalization;
 using Wesal.Application.Common.Interfaces;
 using Wesal.Application.Common.Interfaces.Persistence;
 using Wesal.Application.Common.Models;
+using Wesal.Domain.Common;
 using Wesal.Domain.Constants;
 using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
@@ -147,6 +148,11 @@ public class BookingRequestService : IBookingRequestService
         {
             throw new NotFoundException(nameof(Hall), hallId);
         }
+
+        // A locked hall (Admin lock, FR-SUB-05/US-ADMIN-05, or the automatic system
+        // lock, FR-SUB-03/US-ADMIN-09) must not accept new booking requests, with a
+        // clear 'hall locked' error surfaced to the requester.
+        HallManagementAccess.EnsureAcceptingBookings(hall);
 
         return hall;
     }

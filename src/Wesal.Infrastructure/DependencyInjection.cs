@@ -89,6 +89,11 @@ public static class DependencyInjection
         services.AddScoped<IOwnerAvailabilityService, OwnerAvailabilityService>();
         services.AddScoped<IHallSubscriptionService, HallSubscriptionService>();
         services.AddScoped<IAdminHallService, AdminHallService>();
+        services.AddScoped<IAdminHallReviewService, AdminHallReviewService>();
+        services.AddScoped<IAdminSubscriptionService, AdminSubscriptionService>();
+        services.AddScoped<ISubscriptionExpiryLockService, SubscriptionExpiryLockService>();
+        services.Configure<SubscriptionExpiryLockOptions>(configuration.GetSection(SubscriptionExpiryLockOptions.SectionName));
+        services.AddHostedService<SubscriptionExpiryLockBackgroundService>();
         services.AddSingleton<IHallSearchIndexer, HallSearchIndexer>();
         services.Configure<HallAvailabilityCleanupOptions>(configuration.GetSection(HallAvailabilityCleanupOptions.SectionName));
         services.AddHostedService<HallAvailabilityCleanupBackgroundService>();

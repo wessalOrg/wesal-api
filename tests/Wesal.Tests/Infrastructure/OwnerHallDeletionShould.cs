@@ -68,6 +68,7 @@ public class OwnerHallDeletionShould : IDisposable
             Description = "Spacious hall",
             OwnerId = ownerId,
             Status = status,
+            PaymentStatus = HallPaymentStatus.Paid,
             IsDeleted = isDeleted
         };
         _context.Halls.Add(hall);

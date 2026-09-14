@@ -287,6 +287,7 @@ public class BookingPublishingServiceShould
             Id = Guid.NewGuid(),
             Name = "Grand Hall",
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             OwnerId = HallOwnerId
         };
 

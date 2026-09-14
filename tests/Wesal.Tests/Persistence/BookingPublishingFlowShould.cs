@@ -283,6 +283,7 @@ public class BookingPublishingFlowShould
             Id = id,
             Name = "Grand Hall",
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             OwnerId = "owner-1"
         };
 

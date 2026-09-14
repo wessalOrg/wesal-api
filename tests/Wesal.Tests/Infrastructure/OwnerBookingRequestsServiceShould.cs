@@ -337,6 +337,7 @@ public class OwnerBookingRequestsServiceShould : IDisposable
             ShowPrice = true,
             OwnerId = ownerId,
             Status = HallStatus.Approved,
+            PaymentStatus = HallPaymentStatus.Paid,
             IsDeleted = isDeleted
         };
 

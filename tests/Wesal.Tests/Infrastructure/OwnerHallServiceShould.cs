@@ -77,6 +77,7 @@ public class OwnerHallServiceShould : IDisposable
             MainImageUrl = "https://cdn.example.com/main.jpg",
             OwnerId = ownerId,
             Status = status,
+            PaymentStatus = HallPaymentStatus.Paid,
             IsDeleted = isDeleted
         };
 
