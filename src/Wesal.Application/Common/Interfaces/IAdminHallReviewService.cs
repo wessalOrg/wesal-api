@@ -25,4 +25,13 @@ public interface IAdminHallReviewService
     Task<AdminLockHallResultDto> LockHallAsync(
         Guid hallId,
         CancellationToken cancellationToken = default);
+
+    Task<AdminUnlockHallResultDto> UnlockHallAsync(
+        Guid hallId,
+        CancellationToken cancellationToken = default);
+
+    Task<AdminOwnerMessageResponseDto> SendMessageToOwnerAsync(
+        Guid hallId,
+        string content,
+        CancellationToken cancellationToken = default);
 }

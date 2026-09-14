@@ -81,6 +81,34 @@ public class Hall : BaseAuditableEntity
     /// </summary>
     public bool SystemLocked { get; set; }
 
+    /// <summary>
+    /// Admin user who lifted the manual lock (US-ADMIN-06 audit trail). Null when the
+    /// hall has never been unlocked by an Admin.
+    /// </summary>
+    public string? UnlockedByAdminUserId { get; set; }
+
+    /// <summary>
+    /// When the manual Admin lock was lifted (US-ADMIN-06 audit trail). Null when the
+    /// hall has never been unlocked by an Admin.
+    /// </summary>
+    public DateTimeOffset? UnlockedAt { get; set; }
+
+    /// <summary>
+    /// Subscription cycle this hall's 3-day expiry warning was already delivered for
+    /// (US-ADMIN-08, FR-SUB-02). Null until the daily warning job successfully notifies
+    /// the owner; a value equal to <see cref="SubscriptionCycleEnd"/> makes the job skip
+    /// the hall so the same cycle never warns more than once.
+    /// </summary>
+    public DateOnly? WarningSentForCycleEnd { get; set; }
+
+    /// <summary>
+    /// Consecutive failed delivery attempts of this hall's subscription expiry warning
+    /// (US-ADMIN-08, FR-SUB-02). Reset to zero when the warning is finally delivered;
+    /// a positive value makes the daily job retry the still-undelivered warning with
+    /// escalation until the cycle ends.
+    /// </summary>
+    public int WarningSentAttempts { get; set; }
+
     public ICollection<HallBookingPeriod> BookingPeriods { get; set; } = [];
 
     public ICollection<HallAvailability> Availability { get; set; } = [];

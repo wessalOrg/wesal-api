@@ -13,4 +13,8 @@ public interface IAdminSubscriptionService
     Task<IReadOnlyList<AdminSubscriptionOwnerGroupDto>> GetSubscriptionOverviewAsync(
         AdminSubscriptionOverviewQueryDto query,
         CancellationToken cancellationToken = default);
+
+    Task<AdminMarkPaidResultDto> MarkSubscriptionPaidAsync(
+        Guid hallId,
+        CancellationToken cancellationToken = default);
 }

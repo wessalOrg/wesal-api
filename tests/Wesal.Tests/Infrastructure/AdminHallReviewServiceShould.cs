@@ -10,6 +10,7 @@ using Wesal.Domain.Entities;
 using Wesal.Domain.Enums;
 using Wesal.Domain.Exceptions;
 using Wesal.Infrastructure.Admin;
+using Wesal.Infrastructure.Conversations;
 using Wesal.Infrastructure.Identity;
 using Wesal.Persistence.Data;
 using Wesal.Persistence.Repositories;
@@ -18,6 +19,8 @@ namespace Wesal.Tests.Infrastructure;
 
 public class AdminHallReviewServiceShould : IDisposable
 {
+    private static readonly DateOnly Today = DateOnly.FromDateTime(new DateTime(2026, 8, 15));
+
     private readonly ServiceProvider _provider;
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
@@ -99,6 +102,8 @@ public class AdminHallReviewServiceShould : IDisposable
             new MessageRepository(_context),
             currentUser,
             dateTime ?? new FakeDateTime(new DateTimeOffset(2026, 8, 15, 10, 0, 0, TimeSpan.Zero)),
+            new FakeNotifier(),
+            _userManager,
             NullLogger<AdminHallReviewService>.Instance);
 
     // --- US-ADMIN-01: Pending queue ---
@@ -330,6 +335,190 @@ public class AdminHallReviewServiceShould : IDisposable
                 .LockHallAsync(Guid.NewGuid()));
     }
 
+    // --- US-ADMIN-06: manual unlock ---
+
+    [Fact]
+    public async Task UnlockHall_ClearsOnlyAdminLock_AndRecordsAudit()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var admin = await CreateAdminAsync("admin@example.com");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.Approved);
+        hall.IsAdminLocked = true;
+        hall.LockedByAdminUserId = "admin-before";
+        hall.LockedAt = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        hall.PaymentStatus = HallPaymentStatus.Paid;
+        hall.SystemLocked = false;
+        hall.SubscriptionCycleStart = Today;
+        hall.SubscriptionCycleEnd = Today.AddDays(30);
+        _context.SaveChanges();
+
+        var result = await CreateService(new FakeCurrentUser(admin.Id, true, ApplicationRoles.Admin))
+            .UnlockHallAsync(hall.Id);
+
+        Assert.False(result.IsLocked);
+        Assert.Equal(admin.Id, result.UnlockedByAdminUserId);
+        Assert.NotNull(result.UnlockedAt);
+        Assert.True(result.ManagementAccessRestored);
+
+        var reloaded = await _context.Halls.FindAsync(hall.Id);
+        Assert.False(reloaded!.IsAdminLocked);
+        Assert.False(reloaded.SystemLocked);
+        Assert.Equal(HallPaymentStatus.Paid, reloaded.PaymentStatus);
+        Assert.Equal(admin.Id, reloaded.UnlockedByAdminUserId);
+        Assert.NotNull(reloaded.UnlockedAt);
+        Assert.NotNull(reloaded.LockedByAdminUserId);
+    }
+
+    [Fact]
+    public async Task UnlockHall_UnpaidStillSystemLocked_ReportsNotRestored()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.Approved);
+        hall.IsAdminLocked = true;
+        hall.LockedByAdminUserId = "admin-1";
+        hall.LockedAt = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        hall.PaymentStatus = HallPaymentStatus.Unpaid;
+        hall.SystemLocked = true;
+        _context.SaveChanges();
+
+        var result = await CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+            .UnlockHallAsync(hall.Id);
+
+        Assert.False(result.IsLocked);
+        Assert.False(result.ManagementAccessRestored);
+
+        var reloaded = await _context.Halls.FindAsync(hall.Id);
+        Assert.False(reloaded!.IsAdminLocked);
+        Assert.True(reloaded.SystemLocked);
+        Assert.Equal(HallPaymentStatus.Unpaid, reloaded.PaymentStatus);
+    }
+
+    [Fact]
+    public async Task UnlockHall_CorrectsStaleSystemLock_AfterPaymentRaced()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.Approved);
+        hall.IsAdminLocked = true;
+        hall.LockedByAdminUserId = "admin-1";
+        hall.LockedAt = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        hall.PaymentStatus = HallPaymentStatus.Paid;
+        hall.SystemLocked = true;
+        hall.SubscriptionCycleStart = Today;
+        hall.SubscriptionCycleEnd = Today.AddDays(30);
+        _context.SaveChanges();
+
+        var result = await CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+            .UnlockHallAsync(hall.Id);
+
+        Assert.False(result.IsLocked);
+        Assert.True(result.ManagementAccessRestored);
+
+        var reloaded = await _context.Halls.FindAsync(hall.Id);
+        Assert.False(reloaded!.IsAdminLocked);
+        Assert.False(reloaded.SystemLocked);
+    }
+
+    [Fact]
+    public async Task UnlockHall_NotLocked_IsNoOp()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.Approved);
+
+        var result = await CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+            .UnlockHallAsync(hall.Id);
+
+        Assert.False(result.IsLocked);
+        Assert.Null(result.UnlockedAt);
+        Assert.Null(result.UnlockedByAdminUserId);
+    }
+
+    [Fact]
+    public async Task UnlockHall_NonExistent_ThrowsNotFound()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+                .UnlockHallAsync(Guid.NewGuid()));
+    }
+
+    // --- US-ADMIN-04: direct Admin-to-Owner messaging ---
+
+    [Fact]
+    public async Task SendMessageToOwner_PersistsMessage_AndReturnsSent()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.PendingReview);
+
+        var result = await CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+            .SendMessageToOwnerAsync(hall.Id, "Please add the missing photos.");
+
+        Assert.False(result.OwnerBlocked);
+        Assert.False(result.DeliveryPending);
+        Assert.Equal(hall.Id, result.HallId);
+        Assert.Equal("Please add the missing photos.", result.Content);
+
+        var message = await _context.Messages.FindAsync(result.MessageId);
+        Assert.NotNull(message);
+        Assert.Equal("admin-1", message!.SenderUserId);
+        Assert.Equal("Please add the missing photos.", message.Content);
+
+        var conversation = await _context.Conversations.FindAsync(result.ConversationId);
+        Assert.Equal(owner.Id, conversation!.HallOwnerId);
+    }
+
+    [Fact]
+    public async Task SendMessageToOwner_ReusesExistingConversation()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.PendingReview);
+
+        var service = CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin));
+        var first = await service.SendMessageToOwnerAsync(hall.Id, "First message.");
+        var second = await service.SendMessageToOwnerAsync(hall.Id, "Second message.");
+
+        Assert.Equal(first.ConversationId, second.ConversationId);
+        var all = await _context.Messages
+            .Where(m => m.ConversationId == first.ConversationId)
+            .ToListAsync();
+        Assert.Equal(2, all.Count);
+    }
+
+    [Fact]
+    public async Task SendMessageToOwner_BlockedOwner_QueuesMessageAndFlagsPending()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        await _userManager.SetLockoutEndDateAsync(owner, DateTimeOffset.UtcNow.AddHours(1));
+
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.PendingReview);
+
+        var result = await CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+            .SendMessageToOwnerAsync(hall.Id, "Your account is currently locked.");
+
+        Assert.True(result.OwnerBlocked);
+        Assert.True(result.DeliveryPending);
+
+        var message = await _context.Messages.FindAsync(result.MessageId);
+        Assert.NotNull(message);
+    }
+
+    [Fact]
+    public async Task SendMessageToOwner_MissingContent_ThrowsValidation()
+    {
+        var owner = await CreateOwnerAsync("owner@example.com", "+970599100001");
+        var hall = AddHall(owner.Id, "Grand Hall", HallStatus.PendingReview);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+                .SendMessageToOwnerAsync(hall.Id, "   "));
+    }
+
+    [Fact]
+    public async Task SendMessageToOwner_NonExistentHall_ThrowsNotFound()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            CreateService(new FakeCurrentUser("admin-1", true, ApplicationRoles.Admin))
+                .SendMessageToOwnerAsync(Guid.NewGuid(), "Hello"));
+    }
+
     public void Dispose()
     {
         _context.Database.EnsureDeleted();
@@ -356,5 +545,13 @@ public class AdminHallReviewServiceShould : IDisposable
     {
         public FakeDateTime(DateTimeOffset now) { Now = now; }
         public DateTimeOffset Now { get; }
+    }
+
+    private sealed class FakeNotifier : IConversationNotifier
+    {
+        public Task NotifyMessageSentAsync(MessageSentEvent message, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 }
