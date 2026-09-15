@@ -21,6 +21,18 @@
       No changes detected, skipping git commit
   because the file content is unchanged from the previously deployed archive.
 
+## Database migrations
+- EF Core migrations are applied at deploy time by the Dokku `release` task
+  declared in the Procfile (`release: dotnet out/Wesal.API.dll --migrate`).
+- The `release` task runs once per deploy, after the image is built and before
+  the `web` container is scheduled, using the app's configured environment
+  (including `ConnectionStrings__DefaultConnection`).
+- The application process exits non-zero when the database is unreachable or a
+  migration fails, so the deployment fails instead of starting the API against
+  an out-of-date schema.
+- Normal application startup keeps startup migrations disabled outside
+  Development; startup migration applies only in Development.
+
 ## Known Dokku host issue
 - Dokku < 0.36.0 git-from-archive plugin may log:
       mv: cannot move '.' ... Device or resource busy

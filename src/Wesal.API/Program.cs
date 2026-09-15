@@ -130,6 +130,18 @@ try
 
     var app = builder.Build();
 
+    if (args.Contains("--migrate", StringComparer.OrdinalIgnoreCase))
+    {
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            db.Database.Migrate();
+        }
+
+        Log.Information("Database migrations applied successfully via the deployment release task.");
+        return;
+    }
+
     ValidateNonDevelopmentConfiguration(app.Environment, configuration);
 
     using (var scope = app.Services.CreateScope())
@@ -192,6 +204,7 @@ try
 catch (Exception exception)
 {
     Log.Fatal(exception, "Wesal API terminated unexpectedly.");
+    Environment.ExitCode = 1;
 }
 finally
 {
